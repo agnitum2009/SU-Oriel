@@ -9,6 +9,7 @@ interface ModalProps {
   open: boolean;
   title: string;
   children: ReactNode;
+  contentClassName?: string;
   footer?: ReactNode;
   onClose: () => void;
   size?: ModalSize;
@@ -60,7 +61,7 @@ export function Modal(props: ModalProps) {
             ×
           </button>
         </div>
-        <div className={styles.content}>{props.children}</div>
+        <div className={`${styles.content} ${props.contentClassName ?? ""}`}>{props.children}</div>
         {props.footer ? <div className={styles.footer}>{props.footer}</div> : null}
       </div>
     </div>

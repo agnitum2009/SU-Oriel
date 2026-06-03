@@ -9,6 +9,7 @@ import type { SyncJobView } from "../types/sync-job.js";
 import type { TaskDetailView, TaskTimelineView, TaskView } from "../types/task.js";
 
 vi.mock("../lib/console-api.js", () => ({
+  resolveApiBaseUrl: vi.fn(() => ""),
   buildApiUrl: vi.fn((path: string) => path),
   fetchVersion: vi.fn().mockResolvedValue({
     name: "su-oriel-server",
@@ -43,6 +44,8 @@ vi.mock("../lib/console-api.js", () => ({
   fetchEventJournalEvents: vi.fn().mockResolvedValue({ items: [], pageInfo: { limit: 20, offset: 0, count: 0 } }),
   updateTask: vi.fn(),
   fetchRequirements: vi.fn(),
+  fetchSlots: vi.fn(),
+  fetchTerminalDescriptor: vi.fn(),
   reindexRequirement: vi.fn().mockResolvedValue({ reindexed: true, deduped: false, status: "success", issues: [] }),
   fetchSyncJobs: vi.fn(),
   createRequirement: vi.fn(),
@@ -527,6 +530,13 @@ function mockConsoleApi(): void {
   vi.mocked(consoleApi.fetchTaskTimeline).mockResolvedValue(taskTimeline);
   vi.mocked(consoleApi.updateTask).mockResolvedValue(tasks[2]);
   vi.mocked(consoleApi.fetchRequirements).mockResolvedValue(requirements);
+  vi.mocked(consoleApi.fetchSlots).mockResolvedValue({
+    project: { id: projectId, name: project.name },
+    main: { slotId: "main", lane: "coordination", state: "available", canBindBusiness: false },
+    slots: [],
+    queue: [],
+    generatedAt: "2026-05-24T00:02:00.000Z"
+  });
   vi.mocked(consoleApi.fetchSyncJobs).mockResolvedValue(syncJobs);
   vi.mocked(consoleApi.createRequirement).mockResolvedValue(requirements[0]);
   vi.mocked(consoleApi.createTaskWorkspace).mockResolvedValue(taskDetail.workspaces[0]);

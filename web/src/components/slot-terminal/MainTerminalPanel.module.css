@@ -1,0 +1,54 @@
+.panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  background: var(--gray-50);
+}
+
+.summary {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.primary {
+  margin: 0;
+  color: var(--gray-900);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+.text,
+.fallbackReason {
+  margin: 0;
+  color: var(--gray-600);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.fallbackReason {
+  color: #92400e;
+}
+
+.writeWarning {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-sm);
+  background: #fffbeb;
+  color: #78350f;
+  font-size: var(--text-sm);
+  font-weight: 800;
+}
+
+.surfaceWrap {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
