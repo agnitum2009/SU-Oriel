@@ -101,3 +101,11 @@ pnpm test
 - 模块：项目管理、文档中心、任务看板、需求入口、需求详情、同步与索引、TaskRun 状态机。
 
 > 完整架构与模块规格见 SU-CCB 文档中枢 → [SU-CCB/docs](https://github.com/Im-Sue/SU-CCB/tree/main/docs)（`01_架构设计/su-oriel-*`、`04_模块规格/su-oriel-*`）。
+
+## 交流与讨论
+
+有问题、想法，或想参与共建？扫码加微信（备注 **CCB**），拉你进讨论群：
+
+<img src="assets/wechat.jpg" alt="微信二维码" width="220" />
+
+GitHub [@Im-Sue](https://github.com/Im-Sue) · Telegram [@Sue_muyu](https://t.me/Sue_muyu)
