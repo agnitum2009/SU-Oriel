@@ -59,7 +59,15 @@ pnpm workspace（`web` + `server`），包名 `su-oriel-web` / `su-oriel-server`
 
 ## 快速开始
 
-> **环境**：仅支持 **WSL 与 macOS**（`node-pty` 等原生模块依赖 Unix；Windows 请在 WSL 内运行）。整套系统的底层桥接运行时见 [SeemSeam/claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge)。
+> **环境**：仅支持 **WSL 与 macOS**（`node-pty` 等原生模块依赖 Unix；Windows 请在 WSL 内运行）。
+>
+> **前置必装**：先装底层运行时 [claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge)（提供 `ccb` / `ccbd`，slot 终端等能力依赖它）——
+> ```bash
+> # 从 Releases 下载 ccb-*.tar.gz 后
+> tar -xzf ccb-*.tar.gz && cd ccb-* && ./install.sh install
+> # 或源码：git clone https://github.com/SeemSeam/claude_codex_bridge.git && cd claude_codex_bridge && ./install.sh install
+> ```
+> bridge 前置依赖：Python 3.10+、`tmux`、至少一个 agent CLI。
 
 ```bash
 pnpm install
