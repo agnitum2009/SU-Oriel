@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +19,7 @@ import {
 } from "./slot-terminal.frame-stream.js";
 import { SlotTerminalTargetForbiddenError } from "./slot-terminal.errors.js";
 import {
+  SlotTerminalInputAuditWriter,
   TmuxSlotTerminalInputWriter,
   type SlotTerminalInputAuditSink,
   type SlotTerminalInputWriterBackend
@@ -67,6 +68,7 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
   const projectId = "project-1";
   const requirementId = "req-1";
   const slotId = "slot-2";
+  const agentGroup = "main";
   const projectRoot = options.projectRoot ?? "/repo/SU-CCB";
   const descriptor: SlotTerminalDescriptor = {
     slotId,
@@ -74,6 +76,14 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
     panes: options.panes ?? [
       { role: "claude", target: "%7", paneIndex: 2 },
       { role: "codex", target: "%8", paneIndex: 3 }
+    ]
+  };
+  const agentGroupDescriptor: SlotTerminalDescriptor = {
+    slotId: agentGroup,
+    sessionName: "ccb-su-ccb-test-session",
+    panes: [
+      { role: "claude", target: "%1", paneIndex: 0 },
+      { role: "codex", target: "%2", paneIndex: 1 }
     ]
   };
   const store = new FakeSlotTerminalStore(
@@ -94,6 +104,27 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
         }
         return pane;
       }
+    ),
+    resolveAgentGroupTerminal: vi.fn(async (input: { projectId: string; group: string }) => {
+      if (input.projectId !== projectId || input.group !== agentGroup) {
+        throw new SlotTerminalTargetForbiddenError("agent terminal group is not allowed");
+      }
+      return agentGroupDescriptor;
+    }),
+    assertTargetBelongsToAgentGroup: vi.fn(
+      async (input: { projectId: string; group: string; role: string; target: string }) => {
+        const pane = agentGroupDescriptor.panes.find(
+          (candidate) =>
+            candidate.role === input.role &&
+            candidate.target === input.target &&
+            input.projectId === projectId &&
+            input.group === agentGroup
+        );
+        if (!pane) {
+          throw new SlotTerminalTargetForbiddenError("agent terminal target does not belong to role");
+        }
+        return pane;
+      }
     )
   };
 
@@ -101,8 +132,10 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
     projectId,
     requirementId,
     slotId,
+    agentGroup,
     projectRoot,
     descriptor,
+    agentGroupDescriptor,
     store,
     service
   };
@@ -525,6 +558,272 @@ describe("slot-terminal websocket", () => {
     }
   });
 
+  it("serves agent-terminal ready, frames, input, and per-write guard through the shared core", async () => {
+    const fixture = createRouteFixture();
+    const capture = buildCapture({ "%1": ["main claude frame\n"] });
+    let resolveAudit!: () => void;
+    const auditPromise = new Promise<void>((resolve) => {
+      resolveAudit = resolve;
+    });
+    const inputWriter: SlotTerminalInputWriterBackend = {
+      sendInput: vi.fn(async () => ({ commandCount: 1, bytes: 5 }))
+    };
+    const auditSink: SlotTerminalInputAuditSink = {
+      recordInput: vi.fn(async () => {
+        resolveAudit();
+      })
+    };
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      inputWriter,
+      auditSink
+    });
+
+    try {
+      await app.ready();
+      const { socket, messages } = await collectInjectedMessages(
+        app,
+        `/api/agent-terminal/ws?projectId=${fixture.projectId}&group=${fixture.agentGroup}&pane=claude`,
+        2
+      );
+
+      assert.deepEqual(messages.map((message) => message.type), ["ready", "frame"]);
+      assert.deepEqual(messages[0].descriptor, {
+        projectId: fixture.projectId,
+        group: fixture.agentGroup,
+        slotId: fixture.agentGroup,
+        pane: "claude",
+        target: "%1",
+        source: "slot-terminal",
+        readonly: false,
+        polling: {
+          activeMs: 150,
+          idleMs: 1_000,
+          hidden: "paused"
+        }
+      });
+      assert.deepEqual(messages[1], {
+        type: "frame",
+        data: "main claude frame\n",
+        cols: 17,
+        rows: 1,
+        generation: 1,
+        initial: true
+      });
+      expect(fixture.service.resolveAgentGroupTerminal).toHaveBeenCalledWith({
+        projectId: fixture.projectId,
+        group: fixture.agentGroup
+      });
+      expect(fixture.service.assertTargetBelongsToAgentGroup).toHaveBeenCalledWith({
+        projectId: fixture.projectId,
+        group: fixture.agentGroup,
+        role: "claude",
+        target: "%1"
+      });
+      expect(fixture.service.assertTargetBelongsTo).not.toHaveBeenCalled();
+      expect(capture.calls).toEqual([
+        {
+          target: "%1",
+          socketPath: join(fixture.projectRoot, ".ccb", "ccbd", "tmux.sock"),
+          initial: true
+        }
+      ]);
+
+      socket.send(JSON.stringify({ type: "input", data: "main\r" }));
+      await auditPromise;
+
+      expect(fixture.service.assertTargetBelongsToAgentGroup).toHaveBeenCalledTimes(2);
+      expect(fixture.service.assertTargetBelongsToAgentGroup).toHaveBeenLastCalledWith({
+        projectId: fixture.projectId,
+        group: fixture.agentGroup,
+        role: "claude",
+        target: "%1"
+      });
+      expect(inputWriter.sendInput).toHaveBeenCalledWith({
+        target: "%1",
+        socketPath: join(fixture.projectRoot, ".ccb", "ccbd", "tmux.sock"),
+        data: "main\r"
+      });
+      expect(auditSink.recordInput).toHaveBeenCalledWith({
+        projectId: fixture.projectId,
+        contextKind: "agent-group",
+        contextId: fixture.agentGroup,
+        slotId: fixture.agentGroup,
+        pane: "claude",
+        target: "%1",
+        remoteAddr: "127.0.0.1",
+        data: "main\r",
+        commandCount: 1,
+        outcome: "accepted"
+      });
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects disallowed origins on agent-terminal before pane resolution", async () => {
+    const fixture = createRouteFixture();
+    const capture = buildCapture({ "%1": ["must not capture\n"] });
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture
+    });
+
+    try {
+      await app.ready();
+      let resolveMessages!: (messages: Array<Record<string, unknown>>) => void;
+      let rejectMessages!: (error: unknown) => void;
+      const messagesPromise = new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        resolveMessages = resolve;
+        rejectMessages = reject;
+      });
+      const socket = await app.injectWS(
+        `/api/agent-terminal/ws?projectId=${fixture.projectId}&group=${fixture.agentGroup}&pane=claude`,
+        webSocketRequest(BLOCKED_ORIGIN),
+        {
+          onInit(ws) {
+            collectWebSocketMessages(ws, 1).then(resolveMessages, rejectMessages);
+          }
+        }
+      );
+      const [error] = await messagesPromise;
+
+      expect(error).toMatchObject({
+        type: "error",
+        code: "FORBIDDEN",
+        message: "websocket origin is not allowed"
+      });
+      expect(fixture.service.resolveAgentGroupTerminal).not.toHaveBeenCalled();
+      expect(fixture.service.assertTargetBelongsToAgentGroup).not.toHaveBeenCalled();
+      expect(capture.calls).toHaveLength(0);
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects agent-terminal resize and write-lease control messages", async () => {
+    const fixture = createRouteFixture();
+    const capture = buildCapture({ "%1": ["main claude frame\n"] });
+    const inputWriter: SlotTerminalInputWriterBackend = {
+      sendInput: vi.fn(async () => ({ commandCount: 1, bytes: 1 }))
+    };
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      inputWriter
+    });
+
+    try {
+      await app.ready();
+      const { socket } = await collectInjectedMessages(
+        app,
+        `/api/agent-terminal/ws?projectId=${fixture.projectId}&group=${fixture.agentGroup}&pane=claude`,
+        2
+      );
+      const errorsPromise = collectWebSocketMessages(socket, 3);
+
+      socket.send(JSON.stringify({ type: "resize", cols: 200, rows: 50 }));
+      socket.send(JSON.stringify({ type: "request_write" }));
+      socket.send(JSON.stringify({ type: "release_write" }));
+      const errors = await errorsPromise;
+
+      expect(errors).toEqual([
+        {
+          type: "error",
+          code: "READ_ONLY",
+          message: "slot terminal websocket is read-only"
+        },
+        {
+          type: "error",
+          code: "READ_ONLY",
+          message: "slot terminal websocket is read-only"
+        },
+        {
+          type: "error",
+          code: "READ_ONLY",
+          message: "slot terminal websocket is read-only"
+        }
+      ]);
+      expect(inputWriter.sendInput).not.toHaveBeenCalled();
+      expect(fixture.service.assertTargetBelongsToAgentGroup).toHaveBeenCalledTimes(1);
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects forbidden agent-terminal input revalidation without sending keys", async () => {
+    const fixture = createRouteFixture();
+    const capture = buildCapture({ "%1": ["main claude frame\n"] });
+    let guardCalls = 0;
+    fixture.service.assertTargetBelongsToAgentGroup.mockImplementation(
+      async (input: { projectId: string; group: string; role: string; target: string }) => {
+        guardCalls += 1;
+        if (guardCalls === 1) {
+          return { role: "claude", target: input.target, paneIndex: 0 };
+        }
+        throw new SlotTerminalTargetForbiddenError("agent terminal target does not belong to role");
+      }
+    );
+    const inputWriter: SlotTerminalInputWriterBackend = {
+      sendInput: vi.fn(async () => ({ commandCount: 1, bytes: 1 }))
+    };
+    const auditSink: SlotTerminalInputAuditSink = {
+      recordInput: vi.fn()
+    };
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      inputWriter,
+      auditSink
+    });
+
+    try {
+      await app.ready();
+      const { socket } = await collectInjectedMessages(
+        app,
+        `/api/agent-terminal/ws?projectId=${fixture.projectId}&group=${fixture.agentGroup}&pane=claude`,
+        2
+      );
+      const errorPromise = collectWebSocketMessages(socket, 1);
+
+      socket.send(JSON.stringify({ type: "input", data: "x" }));
+      const [error] = await errorPromise;
+
+      expect(error).toMatchObject({
+        type: "error",
+        code: "FORBIDDEN",
+        message: "agent terminal target does not belong to role"
+      });
+      expect(fixture.service.assertTargetBelongsToAgentGroup).toHaveBeenCalledTimes(2);
+      expect(inputWriter.sendInput).not.toHaveBeenCalled();
+      expect(auditSink.recordInput).toHaveBeenCalledWith({
+        projectId: fixture.projectId,
+        contextKind: "agent-group",
+        contextId: fixture.agentGroup,
+        slotId: fixture.agentGroup,
+        pane: "claude",
+        target: "%1",
+        remoteAddr: "127.0.0.1",
+        data: "x",
+        commandCount: 0,
+        outcome: "forbidden",
+        rejectionCode: "FORBIDDEN",
+        rejectionReason: "agent terminal target does not belong to role"
+      });
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
   it("applies visibility hints received before ready before starting capture", async () => {
     const fixture = createRouteFixture();
     let resolveDescriptor!: (descriptor: SlotTerminalDescriptor) => void;
@@ -670,6 +969,8 @@ describe("slot-terminal websocket", () => {
       });
       expect(auditSink.recordInput).toHaveBeenCalledWith({
         projectId: fixture.projectId,
+        contextKind: "requirement",
+        contextId: fixture.requirementId,
         requirementId: fixture.requirementId,
         slotId: fixture.slotId,
         pane: "claude",
@@ -733,6 +1034,8 @@ describe("slot-terminal websocket", () => {
       expect(inputWriter.sendInput).not.toHaveBeenCalled();
       expect(auditSink.recordInput).toHaveBeenCalledWith({
         projectId: fixture.projectId,
+        contextKind: "requirement",
+        contextId: fixture.requirementId,
         requirementId: fixture.requirementId,
         slotId: fixture.slotId,
         pane: "claude",
@@ -789,6 +1092,8 @@ describe("slot-terminal websocket", () => {
       expect(inputWriter.sendInput).not.toHaveBeenCalled();
       expect(auditSink.recordInput).toHaveBeenCalledWith({
         projectId: fixture.projectId,
+        contextKind: "requirement",
+        contextId: fixture.requirementId,
         requirementId: fixture.requirementId,
         slotId: fixture.slotId,
         pane: "claude",
@@ -803,6 +1108,73 @@ describe("slot-terminal websocket", () => {
       socket.terminate();
     } finally {
       await app.close();
+    }
+  });
+
+  it("writes additive input audit files for requirement and agent-group contexts", async () => {
+    const auditDir = await mkdtempSlotTerminal();
+    const writer = new SlotTerminalInputAuditWriter({ auditDir });
+
+    try {
+      await writer.recordInput({
+        projectId: "project-1",
+        contextKind: "requirement",
+        contextId: "req-1",
+        requirementId: "req-1",
+        slotId: "slot-2",
+        pane: "claude",
+        target: "%7",
+        remoteAddr: "127.0.0.1",
+        data: "req input",
+        commandCount: 1,
+        outcome: "accepted"
+      });
+      await writer.recordInput({
+        projectId: "project-1",
+        contextKind: "agent-group",
+        contextId: "main",
+        slotId: "main",
+        pane: "codex",
+        target: "%2",
+        remoteAddr: "127.0.0.1",
+        data: "main input",
+        commandCount: 1,
+        outcome: "accepted"
+      });
+
+      const requirementRow = JSON.parse(await readFile(join(auditDir, "req-1.jsonl"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      const agentGroupRow = JSON.parse(await readFile(join(auditDir, "agent-group-main.jsonl"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+
+      expect(requirementRow).toMatchObject({
+        projectId: "project-1",
+        contextKind: "requirement",
+        contextId: "req-1",
+        requirementId: "req-1",
+        slotId: "slot-2",
+        pane: "claude",
+        target: "%7",
+        outcome: "accepted",
+        command_count: 1
+      });
+      expect(agentGroupRow).toMatchObject({
+        projectId: "project-1",
+        contextKind: "agent-group",
+        contextId: "main",
+        slotId: "main",
+        pane: "codex",
+        target: "%2",
+        outcome: "accepted",
+        command_count: 1
+      });
+      expect(agentGroupRow).not.toHaveProperty("requirementId");
+    } finally {
+      await rm(auditDir, { recursive: true, force: true });
     }
   });
 
