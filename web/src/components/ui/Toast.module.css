@@ -1,7 +1,7 @@
 .viewport {
   position: fixed;
   right: 24px;
-  bottom: 24px;
+  bottom: calc(24px + var(--toast-reserved-bottom, 0px));
   z-index: 200;
   display: grid;
   gap: 10px;

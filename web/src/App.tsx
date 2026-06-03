@@ -21,6 +21,7 @@ import { Button } from "./components/ui/Button.js";
 import { Input, Textarea } from "./components/ui/Input.js";
 import { Modal } from "./components/ui/Modal.js";
 import { ToastViewport } from "./components/ui/Toast.js";
+import { SlotRequirementsFab } from "./components/slot-requirements-fab/SlotRequirementsFab.js";
 import { AiCliPage } from "./pages/ai-cli/AiCliPage.js";
 import { RecordingPlayPage } from "./pages/ai-cli/RecordingPlayPage.js";
 import { BreakdownReviewPage } from "./pages/breakdown-review/BreakdownReviewPage.js";
@@ -638,7 +639,8 @@ function ConsoleLayout() {
       <CommandPalette commands={commandPaletteItems} />
       <HotkeysHelp />
 
-      <ToastViewport />
+      <ToastViewport reservedBottomPx={selectedProjectId ? 60 : 0} />
+      <SlotRequirementsFab />
     </AppShell>
   );
 }

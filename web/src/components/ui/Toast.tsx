@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
 
 import { useUIStore } from "../../stores/ui-store.js";
 import styles from "./Toast.module.css";
 
-export function ToastViewport() {
+export function ToastViewport({ reservedBottomPx = 0 }: { reservedBottomPx?: number } = {}) {
   const toasts = useUIStore((state) => state.toasts);
   const removeToast = useUIStore((state) => state.removeToast);
 
@@ -24,7 +24,10 @@ export function ToastViewport() {
   }, [removeToast, toasts]);
 
   return (
-    <div className={styles.viewport}>
+    <div
+      className={styles.viewport}
+      style={{ "--toast-reserved-bottom": `${reservedBottomPx}px` } as CSSProperties}
+    >
       {toasts.map((toast) => (
         <div className={`${styles.toast} ${styles[toast.type]}`} key={toast.id}>
           {toast.message}
