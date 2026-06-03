@@ -25,9 +25,20 @@ export type SlotTerminalInputWriteResult = {
   bytes: number;
 };
 
-export type SlotTerminalInputAuditEvent = {
+type SlotTerminalInputAuditContext =
+  | {
+      contextKind: "requirement";
+      contextId: string;
+      requirementId: string;
+    }
+  | {
+      contextKind: "agent-group";
+      contextId: string;
+      requirementId?: never;
+    };
+
+export type SlotTerminalInputAuditEvent = SlotTerminalInputAuditContext & {
   projectId: string;
-  requirementId: string;
   slotId: string;
   pane: string;
   target: string;
@@ -121,6 +132,8 @@ export class SlotTerminalInputAuditWriter implements SlotTerminalInputAuditSink 
     }
     const row = {
       projectId: input.projectId,
+      contextKind: input.contextKind,
+      contextId: input.contextId,
       requirementId: input.requirementId,
       slotId: input.slotId,
       pane: input.pane,
@@ -134,10 +147,17 @@ export class SlotTerminalInputAuditWriter implements SlotTerminalInputAuditSink 
       sha256: createHash("sha256").update(input.data).digest("hex"),
       created_at: new Date().toISOString()
     };
-    const path = resolve(this.auditDir, `${safeSegment(input.requirementId)}.jsonl`);
+    const path = resolve(this.auditDir, auditFileName(input));
     await mkdir(dirname(path), { recursive: true });
     await appendFile(path, `${JSON.stringify(row)}\n`, "utf8");
   }
+}
+
+function auditFileName(input: SlotTerminalInputAuditEvent): string {
+  if (input.contextKind === "requirement") {
+    return `${safeSegment(input.requirementId)}.jsonl`;
+  }
+  return `agent-group-${safeSegment(input.contextId)}.jsonl`;
 }
 
 export type SlotTerminalSendKeysCommand = ["send-keys", ...string[]];

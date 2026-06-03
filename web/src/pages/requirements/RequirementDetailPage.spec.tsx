@@ -28,6 +28,23 @@ vi.mock("../../lib/console-api.js", () => ({
   fetchRequirementMarkdown: vi.fn(),
   fetchSlots: vi.fn(),
   fetchSubtaskBatchCandidates: vi.fn(),
+  fetchTerminalDescriptor: vi.fn(
+    async (
+      target:
+        | { kind: "requirement"; projectId: string; requirementId: string }
+        | { kind: "agentGroup"; projectId: string; group: string }
+    ) => {
+      const path =
+        target.kind === "requirement"
+          ? `/api/projects/${encodeURIComponent(target.projectId)}/requirements/${encodeURIComponent(target.requirementId)}/slot-terminal`
+          : `/api/projects/${encodeURIComponent(target.projectId)}/agent-terminal/${encodeURIComponent(target.group)}`;
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(response.status === 404 ? "slot terminal unavailable" : `slot terminal resolver failed: ${response.status}`);
+      }
+      return await response.json();
+    }
+  ),
   fetchTasks: vi.fn().mockResolvedValue([]),
   getReanalyzeJobStatus: vi.fn(),
   patchRequirement: vi.fn(),

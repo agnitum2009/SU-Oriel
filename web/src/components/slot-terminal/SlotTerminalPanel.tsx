@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../ui/Button.js";
+import { fetchTerminalDescriptor } from "../../lib/console-api.js";
 import type { SlotTerminalWebSocketFactory } from "../../lib/slot-terminal-ws.js";
 import type {
   SlotTerminalDescriptor,
   SlotTerminalPaneRole,
-  SlotTerminalPaneTarget
+  SlotTerminalPaneTarget,
+  SlotTerminalTarget
 } from "../../types/slot-terminal.js";
 import { SlotTerminalSurface } from "./SlotTerminalSurface.js";
+import { TerminalPaneTabs } from "./TerminalPaneTabs.js";
 import styles from "./SlotTerminalPanel.module.css";
-
-const SLOT_TERMINAL_ROLES: SlotTerminalPaneRole[] = ["claude", "codex"];
 
 export interface SlotTerminalPanelSlotView {
   slotId: string;
@@ -35,6 +36,14 @@ type ResolverState =
 export function SlotTerminalPanel(props: SlotTerminalPanelProps) {
   const [resolverState, setResolverState] = useState<ResolverState>({ status: "idle" });
   const [activeRole, setActiveRole] = useState<SlotTerminalPaneRole>("claude");
+  const target = useMemo<SlotTerminalTarget>(
+    () => ({
+      kind: "requirement",
+      projectId: props.projectId,
+      requirementId: props.requirementId
+    }),
+    [props.projectId, props.requirementId]
+  );
 
   useEffect(() => {
     if (!props.requirementSlot) {
@@ -44,7 +53,7 @@ export function SlotTerminalPanel(props: SlotTerminalPanelProps) {
     }
     let cancelled = false;
     setResolverState({ status: "loading" });
-    void fetchSlotTerminalDescriptor(props.projectId, props.requirementId)
+    void fetchTerminalDescriptor(target)
       .then((descriptor) => {
         if (cancelled) {
           return;
@@ -64,7 +73,7 @@ export function SlotTerminalPanel(props: SlotTerminalPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.projectId, props.requirementId, props.requirementSlot?.slotId]);
+  }, [target, props.requirementSlot?.slotId]);
 
   const panesByRole = useMemo(() => {
     const panes = resolverState.status === "ready" ? resolverState.descriptor.panes : [];
@@ -95,32 +104,13 @@ export function SlotTerminalPanel(props: SlotTerminalPanelProps) {
           正在写 {resolverState.descriptor.slotId} 的 {activePaneRole}
         </p>
       </div>
-      <div aria-label="Slot terminal panes" className={styles.tabs} role="tablist">
-        {SLOT_TERMINAL_ROLES.map((role) => {
-          const available = panesByRole.has(role);
-          return (
-            <button
-              aria-selected={activePaneRole === role}
-              className={styles.tab}
-              data-active={activePaneRole === role}
-              disabled={!available}
-              key={role}
-              onClick={() => setActiveRole(role)}
-              role="tab"
-              type="button"
-            >
-              {role}
-            </button>
-          );
-        })}
-      </div>
+      <TerminalPaneTabs activeRole={activePaneRole} onSelectRole={setActiveRole} panesByRole={panesByRole} />
       <div className={styles.surfaceWrap} role="tabpanel">
         <SlotTerminalSurface
           active
           key={`${resolverState.descriptor.slotId}:${activePaneRole}`}
           pane={activePaneRole}
-          projectId={props.projectId}
-          requirementId={props.requirementId}
+          target={target}
           title={`${resolverState.descriptor.slotId} · ${activePaneRole}`}
           webSocketFactory={props.webSocketFactory}
         />
@@ -178,14 +168,4 @@ export function SlotPanelActions(props: {
       <a className={styles.link} href="/slots">打开 Slots</a>
     </div>
   );
-}
-
-async function fetchSlotTerminalDescriptor(projectId: string, requirementId: string): Promise<SlotTerminalDescriptor> {
-  const response = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/requirements/${encodeURIComponent(requirementId)}/slot-terminal`
-  );
-  if (!response.ok) {
-    throw new Error(response.status === 404 ? "slot terminal unavailable" : `slot terminal resolver failed: ${response.status}`);
-  }
-  return (await response.json()) as SlotTerminalDescriptor;
 }

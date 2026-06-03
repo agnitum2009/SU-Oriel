@@ -77,7 +77,9 @@ describe("SlotTerminalPanel", () => {
     expect(screen.getByRole("tab", { name: "claude" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "codex" })).toHaveAttribute("aria-selected", "false");
     await waitFor(() => expect(MockSlotTerminalWebSocket.instances).toHaveLength(1));
-    expect(MockSlotTerminalWebSocket.instances[0].url).toContain("pane=claude");
+    expect(MockSlotTerminalWebSocket.instances[0].url).toMatch(
+      /\/api\/slot-terminal\/ws\?projectId=project-1&requirementId=req-1&pane=claude$/
+    );
 
     MockSlotTerminalWebSocket.instances[0].open();
     expect(MockSlotTerminalWebSocket.instances[0].sentFrames()).toEqual([
@@ -90,7 +92,9 @@ describe("SlotTerminalPanel", () => {
     expect(await screen.findByText("正在写 slot-3 的 codex")).toBeInTheDocument();
     await waitFor(() => expect(MockSlotTerminalWebSocket.instances).toHaveLength(2));
     expect(MockSlotTerminalWebSocket.instances[0].closeCode).toBe(1000);
-    expect(MockSlotTerminalWebSocket.instances[1].url).toContain("pane=codex");
+    expect(MockSlotTerminalWebSocket.instances[1].url).toMatch(
+      /\/api\/slot-terminal\/ws\?projectId=project-1&requirementId=req-1&pane=codex$/
+    );
   });
 
   it("sends hidden and visible hints for the current terminal and never emits resize", async () => {

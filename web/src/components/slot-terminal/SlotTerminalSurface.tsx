@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { createSlotTerminalClient, type SlotTerminalClient, type SlotTerminalWebSocketFactory } from "../../lib/slot-terminal-ws.js";
-import type { SlotTerminalPaneRole, SlotTerminalReadyDescriptor } from "../../types/slot-terminal.js";
+import type { SlotTerminalPaneRole, SlotTerminalReadyDescriptor, SlotTerminalTarget } from "../../types/slot-terminal.js";
 import { SlotTerminalFrameRenderer } from "./SlotTerminalFrameRenderer.js";
 import { useXtermTerminal } from "./useXtermTerminal.js";
 import styles from "./SlotTerminalSurface.module.css";
 
-export interface SlotTerminalSurfaceProps {
-  projectId: string;
-  requirementId: string;
+export interface TerminalSurfaceProps {
+  target: SlotTerminalTarget;
   pane: SlotTerminalPaneRole;
   title?: string;
   active?: boolean;
@@ -16,6 +15,13 @@ export interface SlotTerminalSurfaceProps {
   onReady?: (descriptor: SlotTerminalReadyDescriptor) => void;
   onError?: (code: string, message: string) => void;
 }
+
+type LegacySlotTerminalSurfaceProps = Omit<TerminalSurfaceProps, "target"> & {
+  projectId: string;
+  requirementId: string;
+};
+
+export type SlotTerminalSurfaceProps = TerminalSurfaceProps | LegacySlotTerminalSurfaceProps;
 
 type SlotTerminalContextMenu = { x: number; y: number; hasSelection: boolean };
 
@@ -38,8 +44,9 @@ async function readClipboardText(): Promise<string> {
   }
 }
 
-export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
+export function TerminalSurface(props: TerminalSurfaceProps) {
   const active = props.active ?? true;
+  const target = props.target;
   const clientRef = useRef<SlotTerminalClient | null>(null);
   const rendererRef = useRef<SlotTerminalFrameRenderer | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed" | "error">("connecting");
@@ -48,6 +55,7 @@ export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
   const { containerRef, terminal } = useXtermTerminal({
     onInput: (data) => clientRef.current?.sendInput(data)
   });
+  const targetKey = slotTerminalTargetKey(target);
 
   const copySelection = useCallback((): boolean => {
     const selection = terminal?.getSelection() ?? "";
@@ -78,8 +86,7 @@ export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
     setStatus("connecting");
     setLastError(null);
     const client = createSlotTerminalClient({
-      projectId: props.projectId,
-      requirementId: props.requirementId,
+      target,
       pane: props.pane,
       webSocketFactory: props.webSocketFactory,
       callbacks: {
@@ -110,7 +117,7 @@ export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
         rendererRef.current = null;
       }
     };
-  }, [active, props.pane, props.projectId, props.requirementId, props.webSocketFactory, props.onReady, props.onError, terminal]);
+  }, [active, props.pane, targetKey, props.webSocketFactory, props.onReady, props.onError, terminal]);
 
   // 复制键盘快捷键：Ctrl/Cmd+Shift+C 复制选区。Ctrl+C 不拦截（仍作 SIGINT 发给 pane）。
   // 粘贴统一走容器的 onPasteCapture（拦截浏览器 paste 事件，发原始文本），不走 xterm 内置 paste，
@@ -230,4 +237,26 @@ export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
       ) : null}
     </section>
   );
+}
+
+export function SlotTerminalSurface(props: SlotTerminalSurfaceProps) {
+  if ("target" in props) {
+    return <TerminalSurface {...props} />;
+  }
+  return (
+    <TerminalSurface
+      {...props}
+      target={{
+        kind: "requirement",
+        projectId: props.projectId,
+        requirementId: props.requirementId
+      }}
+    />
+  );
+}
+
+function slotTerminalTargetKey(target: SlotTerminalTarget): string {
+  return target.kind === "requirement"
+    ? `${target.kind}:${target.projectId}:${target.requirementId}`
+    : `${target.kind}:${target.projectId}:${target.group}`;
 }

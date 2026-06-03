@@ -9,6 +9,7 @@ import type { SyncJobView } from "../types/sync-job.js";
 import type { TaskDetailView, TaskView } from "../types/task.js";
 
 vi.mock("../lib/console-api.js", () => ({
+  resolveApiBaseUrl: vi.fn(() => ""),
   buildApiUrl: vi.fn((path: string) => path),
   fetchVersion: vi.fn().mockResolvedValue({
     name: "su-oriel-server",
@@ -44,6 +45,7 @@ vi.mock("../lib/console-api.js", () => ({
   fetchSyncJobs: vi.fn(),
   createRequirement: vi.fn(),
   fetchSlots: vi.fn(),
+  fetchTerminalDescriptor: vi.fn(),
   createTaskWorkspace: vi.fn(),
   cleanupTaskWorkspace: vi.fn(),
   dispatchTaskAnchorCommand: vi.fn(),

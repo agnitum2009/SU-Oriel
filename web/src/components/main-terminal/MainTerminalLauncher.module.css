@@ -1,0 +1,67 @@
+.root {
+  position: fixed;
+  right: 24px;
+  bottom: calc(24px + var(--floating-action-reserved-bottom, 60px));
+  z-index: 46;
+}
+
+.button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--cc-color-border, var(--gray-200));
+  border-radius: 999px;
+  background: var(--gray-900);
+  color: #ffffff;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.button:hover {
+  transform: translateY(-1px);
+}
+
+.stateDot {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.stateDot[data-state="available"],
+.stateDot[data-state="bound"],
+.stateDot[data-state="busy"],
+.stateDot[data-state="ready"],
+.stateDot[data-state="running"] {
+  background: var(--green-500);
+}
+
+.stateDot[data-state="loading"] {
+  background: #f59e0b;
+}
+
+.stateDot[data-state="error"],
+.stateDot[data-state="missing"],
+.stateDot[data-state="unhealthy"] {
+  background: #ef4444;
+}
+
+.modalContent {
+  height: min(720px, calc(92vh - 64px));
+  max-height: min(720px, calc(92vh - 64px));
+  min-height: 460px;
+  overflow: hidden;
+  padding: 0;
+}

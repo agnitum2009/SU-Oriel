@@ -12,6 +12,8 @@ import {
   isSlotTerminalRole,
   PrismaSlotTerminalStore,
   SlotTerminalService,
+  type SlotTerminalDescriptor,
+  type SlotTerminalPaneTarget,
   type SlotTerminalRole,
   type SlotTerminalStore
 } from "./slot-terminal.service.js";
@@ -35,7 +37,10 @@ export const SLOT_TERMINAL_INPUT_MAX_BYTES = 64 * 1024;
 
 export type SlotTerminalWebSocketService = Pick<
   SlotTerminalService,
-  "resolveRequirementTerminal" | "assertTargetBelongsTo"
+  | "resolveRequirementTerminal"
+  | "assertTargetBelongsTo"
+  | "resolveAgentGroupTerminal"
+  | "assertTargetBelongsToAgentGroup"
 >;
 
 export type SlotTerminalWebSocketDependencies = {
@@ -66,6 +71,22 @@ type SlotTerminalSubscription = {
   socketPath: string;
 };
 
+type SlotTerminalWebSocketTarget =
+  | {
+      kind: "requirement";
+      projectId: string;
+      requirementId: string;
+    }
+  | {
+      kind: "agentGroup";
+      projectId: string;
+      group: string;
+    };
+
+type SlotTerminalAuditContext =
+  | { contextKind: "requirement"; contextId: string; requirementId: string }
+  | { contextKind: "agent-group"; contextId: string };
+
 export async function registerSlotTerminalWebSocketRoutes(
   app: FastifyInstance,
   dependencies: SlotTerminalWebSocketDependencies = {}
@@ -79,6 +100,17 @@ export async function registerSlotTerminalWebSocketRoutes(
   const idleIntervalMs = dependencies.idleIntervalMs ?? SLOT_TERMINAL_IDLE_FRAME_INTERVAL_MS;
   const allowedOrigins = dependencies.allowedOrigins ?? getDefaultAllowedOrigins();
   const inputMaxBytes = dependencies.inputMaxBytes ?? SLOT_TERMINAL_INPUT_MAX_BYTES;
+
+  const shared = {
+    store,
+    service,
+    capture,
+    inputWriter,
+    auditSink,
+    activeIntervalMs,
+    idleIntervalMs,
+    inputMaxBytes
+  };
 
   app.get("/api/slot-terminal/ws", { websocket: true }, (socket, request) => {
     if (!isSlotTerminalOriginAllowed(request.headers.origin, allowedOrigins)) {
@@ -101,131 +133,181 @@ export async function registerSlotTerminalWebSocketRoutes(
       return;
     }
 
-    let pump: SlotTerminalFramePump | null = null;
-    let subscription: SlotTerminalSubscription | null = null;
-    let pendingHint: SlotTerminalPollingHint | null = null;
-    let inputQueue = Promise.resolve();
-    let closed = false;
-    const closePump = () => {
+    handleSlotTerminalWebSocketConnection({
+      ...shared,
+      socket,
+      request,
+      target: { kind: "requirement", projectId, requirementId },
+      role: pane
+    });
+  });
+
+  app.get("/api/agent-terminal/ws", { websocket: true }, (socket, request) => {
+    if (!isSlotTerminalOriginAllowed(request.headers.origin, allowedOrigins)) {
+      sendErrorAndClose(socket, "FORBIDDEN", "websocket origin is not allowed", 1008);
+      return;
+    }
+
+    const { projectId, group, pane } = request.query as {
+      projectId?: string;
+      group?: string;
+      pane?: string;
+    };
+
+    if (!projectId || !group || !pane) {
+      sendErrorAndClose(socket, "BAD_REQUEST", "projectId, group, and pane are required", 1008);
+      return;
+    }
+    if (!isSlotTerminalRole(pane)) {
+      sendErrorAndClose(socket, "BAD_REQUEST", "pane must be claude or codex", 1008);
+      return;
+    }
+
+    handleSlotTerminalWebSocketConnection({
+      ...shared,
+      socket,
+      request,
+      target: { kind: "agentGroup", projectId, group },
+      role: pane
+    });
+  });
+}
+
+function handleSlotTerminalWebSocketConnection(input: {
+  socket: {
+    send: (data: string) => void;
+    close: (code?: number, reason?: string) => void;
+    on: {
+      (event: "message", handler: (raw: Buffer | string) => void): void;
+      (event: "close", handler: () => void): void;
+    };
+  };
+  request: { ip?: string; socket: { remoteAddress?: string } };
+  store: Pick<SlotTerminalStore, "findProject">;
+  service: SlotTerminalWebSocketService;
+  capture: SlotTerminalFrameCaptureBackend;
+  inputWriter: SlotTerminalInputWriterBackend;
+  auditSink: SlotTerminalInputAuditSink;
+  activeIntervalMs: number;
+  idleIntervalMs: number;
+  inputMaxBytes: number;
+  target: SlotTerminalWebSocketTarget;
+  role: SlotTerminalRole;
+}): void {
+  let pump: SlotTerminalFramePump | null = null;
+  let subscription: SlotTerminalSubscription | null = null;
+  let pendingHint: SlotTerminalPollingHint | null = null;
+  let inputQueue = Promise.resolve();
+  let closed = false;
+  const closePump = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    pump?.stop();
+  };
+
+  void (async () => {
+    try {
+      const resolvedSubscription = await resolveSlotTerminalSubscription({
+        store: input.store,
+        service: input.service,
+        target: input.target,
+        role: input.role
+      });
+      subscription = resolvedSubscription;
+
       if (closed) {
         return;
       }
-      closed = true;
-      pump?.stop();
-    };
 
-    void (async () => {
-      try {
-        const resolvedSubscription = await resolveSlotTerminalSubscription({
-          store,
-          service,
-          projectId,
-          requirementId,
-          role: pane
-        });
-        subscription = resolvedSubscription;
-
-        if (closed) {
-          return;
-        }
-
-        pump = new SlotTerminalFramePump({
-          capture,
-          target: resolvedSubscription.target,
-          socketPath: resolvedSubscription.socketPath,
-          activeIntervalMs,
-          idleIntervalMs,
-          onFrame: (frame) => {
-            sendJson(socket, {
-              type: "frame",
-              data: frame.data,
-              cols: frame.cols,
-              rows: frame.rows,
-              generation: frame.generation,
-              initial: frame.initial
-            });
-          },
-          onError: (error) => {
-            sendErrorAndClose(socket, "CAPTURE_FAILED", errorMessage(error), 1011);
-          }
-        });
-
-        if (pendingHint) {
-          pump.configureHint(pendingHint);
-          pendingHint = null;
-        }
-
-        sendJson(socket, {
-          type: "ready",
-          descriptor: {
-            projectId,
-            requirementId,
-            slotId: resolvedSubscription.slotId,
-            pane,
-            target: resolvedSubscription.target,
-            source: "slot-terminal",
-            readonly: false,
-            polling: {
-              activeMs: activeIntervalMs,
-              idleMs: idleIntervalMs,
-              hidden: "paused"
-            }
-          }
-        });
-        await pump.start();
-      } catch (error) {
-        sendErrorAndClose(socket, errorCode(error), errorMessage(error), closeCode(error));
-      }
-    })();
-
-    socket.on("message", (raw: Buffer | string) => {
-      const action = evaluateSlotTerminalClientFrame(raw);
-      if (action.type === "send") {
-        sendJson(socket, action.payload);
-      } else if (action.type === "close") {
-        closePump();
-        try {
-          socket.close(1000, "client requested close");
-        } catch {
-          // ignore
-        }
-      } else if (action.type === "hint") {
-        if (pump) {
-          void applySlotTerminalHint(pump, action);
-        } else {
-          pendingHint = mergeSlotTerminalHint(pendingHint, action);
-        }
-      } else if (action.type === "input" || action.type === "paste") {
-        const activeSubscription = subscription;
-        if (!activeSubscription) {
-          sendJson(socket, { type: "error", code: "NOT_READY", message: "slot terminal websocket is not ready" });
-          return;
-        }
-        const mode = action.type;
-        const data = action.data;
-        inputQueue = inputQueue
-          .then(async () => {
-            await applySlotTerminalInput({
-              service,
-              inputWriter,
-              auditSink,
-              projectId,
-              requirementId,
-              subscription: activeSubscription,
-              data,
-              remoteAddr: request.ip || request.socket.remoteAddress || "unknown",
-              inputMaxBytes,
-              mode
-            });
-          })
-          .catch((error) => {
-            sendJson(socket, { type: "error", code: errorCode(error), message: errorMessage(error) });
+      pump = new SlotTerminalFramePump({
+        capture: input.capture,
+        target: resolvedSubscription.target,
+        socketPath: resolvedSubscription.socketPath,
+        activeIntervalMs: input.activeIntervalMs,
+        idleIntervalMs: input.idleIntervalMs,
+        onFrame: (frame) => {
+          sendJson(input.socket, {
+            type: "frame",
+            data: frame.data,
+            cols: frame.cols,
+            rows: frame.rows,
+            generation: frame.generation,
+            initial: frame.initial
           });
-      }
-    });
+        },
+        onError: (error) => {
+          sendErrorAndClose(input.socket, "CAPTURE_FAILED", errorMessage(error), 1011);
+        }
+      });
 
-    socket.on("close", closePump);
+      if (pendingHint) {
+        pump.configureHint(pendingHint);
+        pendingHint = null;
+      }
+
+      sendJson(input.socket, {
+        type: "ready",
+        descriptor: buildReadyDescriptor({
+          target: input.target,
+          subscription: resolvedSubscription,
+          activeIntervalMs: input.activeIntervalMs,
+          idleIntervalMs: input.idleIntervalMs
+        })
+      });
+      await pump.start();
+    } catch (error) {
+      sendErrorAndClose(input.socket, errorCode(error), errorMessage(error), closeCode(error));
+    }
+  })();
+
+  input.socket.on("message", (raw: Buffer | string) => {
+    const action = evaluateSlotTerminalClientFrame(raw);
+    if (action.type === "send") {
+      sendJson(input.socket, action.payload);
+    } else if (action.type === "close") {
+      closePump();
+      try {
+        input.socket.close(1000, "client requested close");
+      } catch {
+        // ignore
+      }
+    } else if (action.type === "hint") {
+      if (pump) {
+        void applySlotTerminalHint(pump, action);
+      } else {
+        pendingHint = mergeSlotTerminalHint(pendingHint, action);
+      }
+    } else if (action.type === "input" || action.type === "paste") {
+      const activeSubscription = subscription;
+      if (!activeSubscription) {
+        sendJson(input.socket, { type: "error", code: "NOT_READY", message: "slot terminal websocket is not ready" });
+        return;
+      }
+      const mode = action.type;
+      const data = action.data;
+      inputQueue = inputQueue
+        .then(async () => {
+          await applySlotTerminalInput({
+            service: input.service,
+            inputWriter: input.inputWriter,
+            auditSink: input.auditSink,
+            wsTarget: input.target,
+            subscription: activeSubscription,
+            data,
+            remoteAddr: input.request.ip || input.request.socket.remoteAddress || "unknown",
+            inputMaxBytes: input.inputMaxBytes,
+            mode
+          });
+        })
+        .catch((error) => {
+          sendJson(input.socket, { type: "error", code: errorCode(error), message: errorMessage(error) });
+        });
+    }
   });
+
+  input.socket.on("close", closePump);
 }
 
 export function evaluateSlotTerminalClientFrame(raw: Buffer | string): SlotTerminalClientFrameAction {
@@ -291,8 +373,7 @@ async function applySlotTerminalInput(input: {
   service: SlotTerminalWebSocketService;
   inputWriter: SlotTerminalInputWriterBackend;
   auditSink: SlotTerminalInputAuditSink;
-  projectId: string;
-  requirementId: string;
+  wsTarget: SlotTerminalWebSocketTarget;
   subscription: SlotTerminalSubscription;
   data: string;
   remoteAddr: string;
@@ -302,11 +383,12 @@ async function applySlotTerminalInput(input: {
   if (!input.data) {
     return;
   }
+  const auditContext = auditContextForTarget(input.wsTarget);
   const bytes = Buffer.byteLength(input.data, "utf8");
   if (bytes > input.inputMaxBytes) {
     await input.auditSink.recordInput({
-      projectId: input.projectId,
-      requirementId: input.requirementId,
+      projectId: input.wsTarget.projectId,
+      ...auditContext,
       slotId: input.subscription.slotId,
       pane: input.subscription.role,
       target: input.subscription.target,
@@ -321,18 +403,16 @@ async function applySlotTerminalInput(input: {
   }
   let checked;
   try {
-    checked = await assertTargetBelongsTo(
-      input.requirementId,
-      input.subscription.slotId,
-      input.subscription.role,
-      input.subscription.target,
-      { service: input.service }
-    );
+    checked = await assertSlotTerminalTarget({
+      service: input.service,
+      wsTarget: input.wsTarget,
+      subscription: input.subscription
+    });
   } catch (error) {
     if (isSlotTerminalTargetForbiddenError(error)) {
       await input.auditSink.recordInput({
-        projectId: input.projectId,
-        requirementId: input.requirementId,
+        projectId: input.wsTarget.projectId,
+        ...auditContext,
         slotId: input.subscription.slotId,
         pane: input.subscription.role,
         target: input.subscription.target,
@@ -352,8 +432,8 @@ async function applySlotTerminalInput(input: {
       ? await input.inputWriter.sendPaste(write)
       : await input.inputWriter.sendInput(write);
   await input.auditSink.recordInput({
-    projectId: input.projectId,
-    requirementId: input.requirementId,
+    projectId: input.wsTarget.projectId,
+    ...auditContext,
     slotId: input.subscription.slotId,
     pane: input.subscription.role,
     target: checked.target,
@@ -367,19 +447,15 @@ async function applySlotTerminalInput(input: {
 async function resolveSlotTerminalSubscription(input: {
   store: Pick<SlotTerminalStore, "findProject">;
   service: SlotTerminalWebSocketService;
-  projectId: string;
-  requirementId: string;
+  target: SlotTerminalWebSocketTarget;
   role: SlotTerminalRole;
 }): Promise<SlotTerminalSubscription> {
   const [project, descriptor] = await Promise.all([
-    input.store.findProject(input.projectId),
-    input.service.resolveRequirementTerminal({
-      projectId: input.projectId,
-      requirementId: input.requirementId
-    })
+    input.store.findProject(input.target.projectId),
+    resolveTerminalDescriptor(input.service, input.target)
   ]);
   if (!project) {
-    throw new Error("slot terminal project not found");
+    throw new Error(`${input.target.kind === "requirement" ? "slot" : "agent"} terminal project not found`);
   }
 
   const pane = descriptor.panes.find((candidate) => candidate.role === input.role);
@@ -387,15 +463,110 @@ async function resolveSlotTerminalSubscription(input: {
     throw new Error("slot terminal pane not found");
   }
 
-  const checked = await assertTargetBelongsTo(input.requirementId, descriptor.slotId, input.role, pane.target, {
-    service: input.service
+  const socketPath = buildSlotTerminalTmuxSocketPath(project.localPath);
+  const checked = await assertSlotTerminalTarget({
+    service: input.service,
+    wsTarget: input.target,
+    subscription: {
+      slotId: descriptor.slotId,
+      role: input.role,
+      target: pane.target,
+      socketPath
+    }
   });
 
   return {
     slotId: descriptor.slotId,
     role: input.role,
     target: checked.target,
-    socketPath: buildSlotTerminalTmuxSocketPath(project.localPath)
+    socketPath
+  };
+}
+
+async function resolveTerminalDescriptor(
+  service: SlotTerminalWebSocketService,
+  target: SlotTerminalWebSocketTarget
+): Promise<SlotTerminalDescriptor> {
+  if (target.kind === "requirement") {
+    return await service.resolveRequirementTerminal({
+      projectId: target.projectId,
+      requirementId: target.requirementId
+    });
+  }
+  return await service.resolveAgentGroupTerminal({
+    projectId: target.projectId,
+    group: target.group
+  });
+}
+
+async function assertSlotTerminalTarget(input: {
+  service: SlotTerminalWebSocketService;
+  wsTarget: SlotTerminalWebSocketTarget;
+  subscription: SlotTerminalSubscription;
+}): Promise<SlotTerminalPaneTarget> {
+  if (input.wsTarget.kind === "requirement") {
+    return await assertTargetBelongsTo(
+      input.wsTarget.requirementId,
+      input.subscription.slotId,
+      input.subscription.role,
+      input.subscription.target,
+      { service: input.service }
+    );
+  }
+
+  return await input.service.assertTargetBelongsToAgentGroup({
+    projectId: input.wsTarget.projectId,
+    group: input.wsTarget.group,
+    role: input.subscription.role,
+    target: input.subscription.target
+  });
+}
+
+function auditContextForTarget(target: SlotTerminalWebSocketTarget): SlotTerminalAuditContext {
+  if (target.kind === "requirement") {
+    return {
+      contextKind: "requirement",
+      contextId: target.requirementId,
+      requirementId: target.requirementId
+    };
+  }
+  return {
+    contextKind: "agent-group",
+    contextId: target.group
+  };
+}
+
+function buildReadyDescriptor(input: {
+  target: SlotTerminalWebSocketTarget;
+  subscription: SlotTerminalSubscription;
+  activeIntervalMs: number;
+  idleIntervalMs: number;
+}): Record<string, unknown> {
+  const base = {
+    slotId: input.subscription.slotId,
+    pane: input.subscription.role,
+    target: input.subscription.target,
+    source: "slot-terminal",
+    readonly: false,
+    polling: {
+      activeMs: input.activeIntervalMs,
+      idleMs: input.idleIntervalMs,
+      hidden: "paused"
+    }
+  };
+
+  if (input.target.kind === "requirement") {
+    return {
+      projectId: input.target.projectId,
+      requirementId: input.target.requirementId,
+      ...base
+    };
+  }
+
+  return {
+    projectId: input.target.projectId,
+    group: input.target.group,
+    ...base
   };
 }
 

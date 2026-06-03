@@ -13,14 +13,20 @@ const execFileAsync = promisify(execFile);
 const SESSION_PREFIX = "ccb-su-ccb-";
 const TMUX_SOCKET_RELATIVE_PATH = join(".ccb", "ccbd", "tmux.sock");
 const LIVE_BINDING_STATES = new Set(["bound", "busy", "unhealthy", "recovering"]);
+const AGENT_GROUP_WINDOWS = ["main"] as const;
 
 export const SLOT_TERMINAL_ROLES = ["claude", "codex"] as const;
 export type SlotTerminalRole = (typeof SLOT_TERMINAL_ROLES)[number];
+type AgentGroupWindow = (typeof AGENT_GROUP_WINDOWS)[number];
 
 export type SlotTerminalPaneTarget = {
   role: SlotTerminalRole;
   target: string;
   paneIndex: number;
+};
+
+export type SlotTerminalPaneCandidate = SlotTerminalPaneTarget & {
+  agentName: string;
 };
 
 export type SlotTerminalDescriptor = {
@@ -47,6 +53,10 @@ export interface SlotTerminalRuntimeResolver {
     sessionName: string;
     panes: SlotTerminalPaneTarget[];
   }>;
+  resolveSlotPaneCandidates(input: { projectRoot: string; slotId: string }): Promise<{
+    sessionName: string;
+    candidatesByRole: Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>;
+  }>;
 }
 
 export type SlotTerminalExecFileProcess = (
@@ -55,6 +65,10 @@ export type SlotTerminalExecFileProcess = (
 ) => Promise<{ stdout: string; stderr: string }>;
 
 type RuntimeRecord = Record<string, unknown>;
+type RuntimeRecordEntry = {
+  agentName: string;
+  record: RuntimeRecord;
+};
 
 type ListedPane = {
   sessionName: string;
@@ -111,29 +125,19 @@ export class TmuxSlotTerminalRuntimeResolver implements SlotTerminalRuntimeResol
     sessionName: string;
     panes: SlotTerminalPaneTarget[];
   }> {
-    const socketPath = buildSlotTerminalTmuxSocketPath(input.projectRoot);
-    const [sessionName, runtimeRecords] = await Promise.all([
-      this.resolveSessionName(socketPath),
-      readRuntimeRecords(input.projectRoot)
-    ]);
-    const listedPanes = await this.listPanes(socketPath, sessionName, input.slotId);
-    const paneById = new Map(listedPanes.map((pane) => [pane.paneId, pane]));
-    const paneIdsByRole = collectRuntimePaneIdsByRole(runtimeRecords, input.slotId);
+    const { sessionName, candidatesByRole } = await this.resolveSlotPaneCandidates(input);
     const panes: SlotTerminalPaneTarget[] = [];
 
     for (const role of SLOT_TERMINAL_ROLES) {
-      for (const paneId of paneIdsByRole.get(role) ?? []) {
-        const pane = paneById.get(paneId);
-        if (!pane || pane.windowName !== input.slotId || pane.sessionName !== sessionName) {
-          continue;
-        }
-        panes.push({
-          role,
-          target: pane.paneId,
-          paneIndex: pane.paneIndex
-        });
-        break;
+      const candidate = candidatesByRole.get(role)?.[0];
+      if (!candidate) {
+        continue;
       }
+      panes.push({
+        role,
+        target: candidate.target,
+        paneIndex: candidate.paneIndex
+      });
     }
 
     if (panes.length === 0) {
@@ -143,6 +147,29 @@ export class TmuxSlotTerminalRuntimeResolver implements SlotTerminalRuntimeResol
     return {
       sessionName,
       panes
+    };
+  }
+
+  async resolveSlotPaneCandidates(input: { projectRoot: string; slotId: string }): Promise<{
+    sessionName: string;
+    candidatesByRole: Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>;
+  }> {
+    const socketPath = buildSlotTerminalTmuxSocketPath(input.projectRoot);
+    const [sessionName, runtimeRecords] = await Promise.all([
+      this.resolveSessionName(socketPath),
+      readRuntimeRecords(input.projectRoot)
+    ]);
+    const listedPanes = await this.listPanes(socketPath, sessionName, input.slotId);
+    const paneById = new Map(listedPanes.map((pane) => [pane.paneId, pane]));
+    const candidatesByRole = collectRuntimePaneCandidatesByRole(runtimeRecords, input.slotId, sessionName, paneById);
+
+    if ([...candidatesByRole.values()].every((candidates) => candidates.length === 0)) {
+      throw new SlotTerminalNotFoundError("slot terminal panes not found");
+    }
+
+    return {
+      sessionName,
+      candidatesByRole
     };
   }
 
@@ -231,6 +258,31 @@ export class SlotTerminalService {
     };
   }
 
+  async resolveAgentGroupTerminal(input: {
+    projectId: string;
+    group: string;
+  }): Promise<SlotTerminalDescriptor> {
+    if (!isAgentGroupWindow(input.group)) {
+      throw new SlotTerminalTargetForbiddenError("agent terminal group is not allowed");
+    }
+
+    const project = await this.store.findProject(input.projectId);
+    if (!project) {
+      throw new SlotTerminalNotFoundError("agent terminal project not found");
+    }
+
+    const resolved = await this.runtime.resolveSlotPaneCandidates({
+      projectRoot: project.localPath,
+      slotId: input.group
+    });
+
+    return {
+      slotId: input.group,
+      sessionName: resolved.sessionName,
+      panes: strictAgentGroupPanes(input.group, resolved.candidatesByRole)
+    };
+  }
+
   async assertTargetBelongsTo(input: {
     requirementId: string;
     slotId: string;
@@ -260,9 +312,36 @@ export class SlotTerminalService {
       throw new SlotTerminalTargetForbiddenError("slot terminal target does not belong to slot");
     }
 
-    const pane = descriptor.panes.find((candidate) => candidate.role === input.role && candidate.target === input.target);
+    const pane = matchPane(descriptor, input.role, input.target);
     if (!pane) {
       throw new SlotTerminalTargetForbiddenError("slot terminal target does not belong to role");
+    }
+    return pane;
+  }
+
+  async assertTargetBelongsToAgentGroup(input: {
+    projectId: string;
+    group: string;
+    role: string;
+    target: string;
+  }): Promise<SlotTerminalPaneTarget> {
+    if (!isSlotTerminalRole(input.role) || !input.target.trim()) {
+      throw new SlotTerminalTargetForbiddenError("agent terminal target role is not allowed");
+    }
+
+    const descriptor = await this.resolveAgentGroupTerminal({
+      projectId: input.projectId,
+      group: input.group
+    }).catch((error: unknown) => {
+      if (error instanceof SlotTerminalNotFoundError) {
+        throw new SlotTerminalTargetForbiddenError("agent terminal target does not belong to group");
+      }
+      throw error;
+    });
+
+    const pane = matchPane(descriptor, input.role, input.target);
+    if (!pane) {
+      throw new SlotTerminalTargetForbiddenError("agent terminal target does not belong to role");
     }
     return pane;
   }
@@ -276,6 +355,10 @@ export function isSlotTerminalRole(value: string): value is SlotTerminalRole {
   return (SLOT_TERMINAL_ROLES as readonly string[]).includes(value);
 }
 
+function isAgentGroupWindow(value: string): value is AgentGroupWindow {
+  return (AGENT_GROUP_WINDOWS as readonly string[]).includes(value);
+}
+
 function isLiveRequirementBinding(
   binding: SlotTerminalBinding | null,
   requirementId: string
@@ -287,12 +370,12 @@ function isLiveRequirementBinding(
   );
 }
 
-async function readRuntimeRecords(projectRoot: string): Promise<RuntimeRecord[]> {
+async function readRuntimeRecords(projectRoot: string): Promise<RuntimeRecordEntry[]> {
   const agentsDir = join(projectRoot, ".ccb", "agents");
   const entries = await readdir(agentsDir, { withFileTypes: true }).catch(() => {
     throw new SlotTerminalNotFoundError("slot terminal runtime metadata not found");
   });
-  const records: RuntimeRecord[] = [];
+  const records: RuntimeRecordEntry[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) {
@@ -303,7 +386,11 @@ async function readRuntimeRecords(projectRoot: string): Promise<RuntimeRecord[]>
       continue;
     }
     try {
-      records.push(JSON.parse(text) as RuntimeRecord);
+      const record = JSON.parse(text) as RuntimeRecord;
+      records.push({
+        agentName: normalizeString(record.agent_name) ?? entry.name,
+        record
+      });
     } catch {
       continue;
     }
@@ -312,10 +399,15 @@ async function readRuntimeRecords(projectRoot: string): Promise<RuntimeRecord[]>
   return records;
 }
 
-function collectRuntimePaneIdsByRole(records: RuntimeRecord[], slotId: string): Map<SlotTerminalRole, string[]> {
-  const paneIdsByRole = new Map<SlotTerminalRole, string[]>();
+function collectRuntimePaneCandidatesByRole(
+  records: RuntimeRecordEntry[],
+  slotId: string,
+  sessionName: string,
+  paneById: Map<string, ListedPane>
+): Map<SlotTerminalRole, SlotTerminalPaneCandidate[]> {
+  const candidatesByRole = new Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>();
 
-  for (const record of records) {
+  for (const { agentName, record } of records) {
     const role = normalizeRuntimeRole(record.provider);
     const windowName = normalizeString(record.tmux_window_name);
     const paneId =
@@ -325,10 +417,65 @@ function collectRuntimePaneIdsByRole(records: RuntimeRecord[], slotId: string): 
     if (!role || windowName !== slotId || !paneId) {
       continue;
     }
-    paneIdsByRole.set(role, [...(paneIdsByRole.get(role) ?? []), paneId]);
+
+    const pane = paneById.get(paneId);
+    if (!pane || pane.windowName !== slotId || pane.sessionName !== sessionName) {
+      continue;
+    }
+
+    candidatesByRole.set(role, [
+      ...(candidatesByRole.get(role) ?? []),
+      {
+        role,
+        target: pane.paneId,
+        paneIndex: pane.paneIndex,
+        agentName
+      }
+    ]);
   }
 
-  return paneIdsByRole;
+  return candidatesByRole;
+}
+
+function strictAgentGroupPanes(
+  group: AgentGroupWindow,
+  candidatesByRole: Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>
+): SlotTerminalPaneTarget[] {
+  const panes: SlotTerminalPaneTarget[] = [];
+  const expectedAgents: Record<AgentGroupWindow, Record<SlotTerminalRole, string>> = {
+    main: {
+      claude: "main_claude",
+      codex: "main_codex"
+    }
+  };
+
+  for (const role of SLOT_TERMINAL_ROLES) {
+    const candidates = candidatesByRole.get(role) ?? [];
+    if (candidates.length !== 1) {
+      throw new SlotTerminalNotFoundError("agent terminal panes are not uniquely resolvable");
+    }
+
+    const candidate = candidates[0];
+    if (candidate.agentName !== expectedAgents[group][role]) {
+      throw new SlotTerminalNotFoundError("agent terminal runtime metadata does not match group");
+    }
+
+    panes.push({
+      role: candidate.role,
+      target: candidate.target,
+      paneIndex: candidate.paneIndex
+    });
+  }
+
+  return panes;
+}
+
+function matchPane(
+  descriptor: SlotTerminalDescriptor,
+  role: SlotTerminalRole,
+  target: string
+): SlotTerminalPaneTarget | null {
+  return descriptor.panes.find((candidate) => candidate.role === role && candidate.target === target) ?? null;
 }
 
 function parsePaneLine(line: string): ListedPane {

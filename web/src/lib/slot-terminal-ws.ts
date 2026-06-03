@@ -4,7 +4,8 @@ import {
   type SlotTerminalClientFrame,
   type SlotTerminalPaneRole,
   type SlotTerminalReadyDescriptor,
-  type SlotTerminalSnapshotFrame
+  type SlotTerminalSnapshotFrame,
+  type SlotTerminalTarget
 } from "../types/slot-terminal.js";
 
 const SOCKET_OPEN = 1;
@@ -18,13 +19,20 @@ export interface SlotTerminalClientCallbacks {
   onStatusChange?: (status: SlotTerminalClientStatus) => void;
 }
 
-export interface SlotTerminalClientOptions {
-  projectId: string;
-  requirementId: string;
+type SlotTerminalClientTargetOptions =
+  | {
+      target: SlotTerminalTarget;
+    }
+  | {
+      projectId: string;
+      requirementId: string;
+    };
+
+export type SlotTerminalClientOptions = SlotTerminalClientTargetOptions & {
   pane: SlotTerminalPaneRole;
   webSocketFactory?: SlotTerminalWebSocketFactory;
   callbacks?: SlotTerminalClientCallbacks;
-}
+};
 
 export interface SlotTerminalWebSocketLike {
   readonly readyState: number;
@@ -69,7 +77,7 @@ export function createSlotTerminalClient(options: SlotTerminalClientOptions) {
   };
 
   try {
-    socket = new webSocketFactory(buildSlotTerminalWsUrl(options));
+    socket = new webSocketFactory(buildTerminalWsUrl({ target: normalizeSlotTerminalTarget(options), pane: options.pane }));
   } catch (error) {
     setStatus("error");
     callbacks.onError?.("WS_OPEN_FAILED", error instanceof Error ? error.message : "slot terminal websocket failed");
@@ -144,23 +152,67 @@ export function createSlotTerminalClient(options: SlotTerminalClientOptions) {
   };
 }
 
+export function buildTerminalWsUrl(input: {
+  target: SlotTerminalTarget;
+  pane: SlotTerminalPaneRole;
+}): string {
+  const params = terminalWsParams(input.target, input.pane);
+  const base = resolveApiBaseUrl();
+  const path = `${terminalWsPath(input.target)}?${params.toString()}`;
+  if (base) {
+    return `${base.replace(/^http/, "ws")}${path}`;
+  }
+  const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
+  const host = typeof window !== "undefined" ? window.location.host : "127.0.0.1:3030";
+  return `${proto}://${host}${path}`;
+}
+
 export function buildSlotTerminalWsUrl(input: {
   projectId: string;
   requirementId: string;
   pane: SlotTerminalPaneRole;
 }): string {
-  const params = new URLSearchParams({
-    projectId: input.projectId,
-    requirementId: input.requirementId,
+  return buildTerminalWsUrl({
+    target: {
+      kind: "requirement",
+      projectId: input.projectId,
+      requirementId: input.requirementId
+    },
     pane: input.pane
   });
-  const base = resolveApiBaseUrl();
-  if (base) {
-    return `${base.replace(/^http/, "ws")}/api/slot-terminal/ws?${params.toString()}`;
-  }
-  const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss" : "ws";
-  const host = typeof window !== "undefined" ? window.location.host : "127.0.0.1:3030";
-  return `${proto}://${host}/api/slot-terminal/ws?${params.toString()}`;
 }
 
 export type SlotTerminalClient = ReturnType<typeof createSlotTerminalClient>;
+
+export const createTerminalClient = createSlotTerminalClient;
+export type TerminalClient = SlotTerminalClient;
+
+function normalizeSlotTerminalTarget(options: SlotTerminalClientTargetOptions): SlotTerminalTarget {
+  if ("target" in options) {
+    return options.target;
+  }
+  return {
+    kind: "requirement",
+    projectId: options.projectId,
+    requirementId: options.requirementId
+  };
+}
+
+function terminalWsPath(target: SlotTerminalTarget): string {
+  return target.kind === "requirement" ? "/api/slot-terminal/ws" : "/api/agent-terminal/ws";
+}
+
+function terminalWsParams(target: SlotTerminalTarget, pane: SlotTerminalPaneRole): URLSearchParams {
+  if (target.kind === "requirement") {
+    return new URLSearchParams({
+      projectId: target.projectId,
+      requirementId: target.requirementId,
+      pane
+    });
+  }
+  return new URLSearchParams({
+    projectId: target.projectId,
+    group: target.group,
+    pane
+  });
+}

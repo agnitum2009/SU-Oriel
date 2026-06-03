@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSlotTerminalClient, type SlotTerminalWebSocketLike } from "../../lib/slot-terminal-ws.js";
+import { buildTerminalDescriptorPath, fetchTerminalDescriptor } from "../../lib/console-api.js";
+import { buildTerminalWsUrl, createSlotTerminalClient, type SlotTerminalWebSocketLike } from "../../lib/slot-terminal-ws.js";
 import {
   parseSlotTerminalServerFrame,
   SLOT_TERMINAL_CLIENT_FRAME_TYPES,
+  type SlotTerminalDescriptor,
   type SlotTerminalReadyDescriptor
 } from "../../types/slot-terminal.js";
 import {
@@ -93,6 +95,21 @@ const readyDescriptor: SlotTerminalReadyDescriptor = {
   }
 };
 
+const agentGroupReadyDescriptor: SlotTerminalReadyDescriptor = {
+  projectId: "project-1",
+  group: "main",
+  slotId: "main",
+  pane: "codex",
+  target: "%2",
+  source: "slot-terminal",
+  readonly: false,
+  polling: {
+    activeMs: 150,
+    idleMs: 1_000,
+    hidden: "paused"
+  }
+};
+
 afterEach(() => {
   MockSlotTerminalWebSocket.instances = [];
   vi.unstubAllGlobals();
@@ -103,6 +120,10 @@ describe("slot-terminal protocol contract", () => {
     expect(parseSlotTerminalServerFrame(JSON.stringify({ type: "ready", descriptor: readyDescriptor }))).toEqual({
       type: "ready",
       descriptor: readyDescriptor
+    });
+    expect(parseSlotTerminalServerFrame(JSON.stringify({ type: "ready", descriptor: agentGroupReadyDescriptor }))).toEqual({
+      type: "ready",
+      descriptor: agentGroupReadyDescriptor
     });
     expect(
       parseSlotTerminalServerFrame(
@@ -143,12 +164,33 @@ describe("slot-terminal protocol contract", () => {
 });
 
 describe("slot-terminal mock websocket substrate", () => {
+  it("builds requirement and agent-group terminal descriptor and websocket URLs", async () => {
+    const descriptor: SlotTerminalDescriptor = {
+      slotId: "slot-2",
+      sessionName: "ccb-su-ccb-test-session",
+      panes: [{ role: "claude", target: "%7", paneIndex: 1 }]
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(descriptor)));
+    const requirementTarget = { kind: "requirement" as const, projectId: "project-1", requirementId: "req-1" };
+    const agentGroupTarget = { kind: "agentGroup" as const, projectId: "project-1", group: "main" };
+
+    expect(buildTerminalDescriptorPath(requirementTarget)).toBe("/api/projects/project-1/requirements/req-1/slot-terminal");
+    await expect(fetchTerminalDescriptor(requirementTarget)).resolves.toEqual(descriptor);
+    expect(fetch).toHaveBeenCalledWith("/api/projects/project-1/requirements/req-1/slot-terminal");
+    expect(buildTerminalDescriptorPath(agentGroupTarget)).toBe("/api/projects/project-1/agent-terminal/main");
+    expect(buildTerminalWsUrl({ target: requirementTarget, pane: "claude" })).toMatch(
+      /\/api\/slot-terminal\/ws\?projectId=project-1&requirementId=req-1&pane=claude$/
+    );
+    expect(buildTerminalWsUrl({ target: agentGroupTarget, pane: "codex" })).toMatch(
+      /\/api\/agent-terminal\/ws\?projectId=project-1&group=main&pane=codex$/
+    );
+  });
+
   it("renders initial history once and repaints changed-only live frames without trailing newlines", async () => {
     const terminal = new FakeTerminal();
     const renderer = new SlotTerminalFrameRenderer(terminal);
     const client = createSlotTerminalClient({
-      projectId: "project-1",
-      requirementId: "req-1",
+      target: { kind: "requirement", projectId: "project-1", requirementId: "req-1" },
       pane: "claude",
       webSocketFactory: MockSlotTerminalWebSocket,
       callbacks: {
@@ -201,8 +243,7 @@ describe("slot-terminal mock websocket substrate", () => {
 
   it("sends visibility and active hints for hidden pause and never sends resize", () => {
     const client = createSlotTerminalClient({
-      projectId: "project-1",
-      requirementId: "req-1",
+      target: { kind: "requirement", projectId: "project-1", requirementId: "req-1" },
       pane: "codex",
       webSocketFactory: MockSlotTerminalWebSocket
     });
@@ -234,4 +275,13 @@ describe("slot-terminal mock websocket substrate", () => {
 
 async function nextRenderFrame(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
 }

@@ -323,6 +323,23 @@ exports[`E12 acceptance DOM baselines > captures AI CLI page baseline 1`] = `
     style="--toast-reserved-bottom: 60px;"
   />
   <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
+  <div
     class="_root_00495b"
   >
     <button
@@ -485,6 +502,23 @@ exports[`E12 acceptance DOM baselines > captures documents page baseline 1`] = `
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >
@@ -792,6 +826,23 @@ exports[`E12 acceptance DOM baselines > captures overview page baseline 1`] = `
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >
@@ -1129,6 +1180,23 @@ exports[`E12 acceptance DOM baselines > captures recording play page baseline 1`
     style="--toast-reserved-bottom: 60px;"
   />
   <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
+  <div
     class="_root_00495b"
   >
     <button
@@ -1343,6 +1411,23 @@ exports[`E12 acceptance DOM baselines > captures requirements page baseline 1`] 
     style="--toast-reserved-bottom: 60px;"
   />
   <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
+  <div
     class="_root_00495b"
   >
     <button
@@ -1493,6 +1578,23 @@ exports[`E12 acceptance DOM baselines > captures runs page baseline 1`] = `
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >
@@ -1737,6 +1839,23 @@ exports[`E12 acceptance DOM baselines > captures settings page baseline 1`] = `
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >
@@ -2549,6 +2668,23 @@ exports[`E12 acceptance DOM baselines > captures task detail v2 consultation nod
     style="--toast-reserved-bottom: 60px;"
   />
   <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
+  <div
     class="_root_00495b"
   >
     <button
@@ -3303,6 +3439,23 @@ exports[`E12 acceptance DOM baselines > captures task detail v2 default node bas
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >
@@ -4059,6 +4212,23 @@ exports[`E12 acceptance DOM baselines > captures task detail v2 legacy tab redir
     style="--toast-reserved-bottom: 60px;"
   />
   <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
+  <div
     class="_root_00495b"
   >
     <button
@@ -4587,6 +4757,23 @@ exports[`E12 acceptance DOM baselines > captures tasks board page baseline 1`] =
     class="_viewport_6e3cea"
     style="--toast-reserved-bottom: 60px;"
   />
+  <div
+    class="_root_10fe4c"
+    data-testid="main-terminal-launcher"
+  >
+    <button
+      aria-label="main agent 组终端快捷入口"
+      class="_button_10fe4c"
+      title="main agent 组终端 · available"
+      type="button"
+    >
+      M
+      <span
+        class="_stateDot_10fe4c"
+        data-state="available"
+      />
+    </button>
+  </div>
   <div
     class="_root_00495b"
   >

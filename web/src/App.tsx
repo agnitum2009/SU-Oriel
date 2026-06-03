@@ -13,6 +13,7 @@ import { AiCliSettingsModal } from "./components/ai-cli/AiCliSettingsModal.js";
 import { CommandPalette, type CommandPaletteItem } from "./components/command-palette/CommandPalette.js";
 import { HotkeysHelp } from "./components/keyboard/HotkeysHelp.js";
 import { AppShell } from "./components/layout/AppShell.js";
+import { MainTerminalLauncher } from "./components/main-terminal/MainTerminalLauncher.js";
 import { PageHeader } from "./components/layout/PageHeader.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { ProjectScanProgressBar } from "./components/projects/ProjectScanProgressBar.js";
@@ -640,6 +641,7 @@ function ConsoleLayout() {
       <HotkeysHelp />
 
       <ToastViewport reservedBottomPx={selectedProjectId ? 60 : 0} />
+      <MainTerminalLauncher />
       <SlotRequirementsFab />
     </AppShell>
   );

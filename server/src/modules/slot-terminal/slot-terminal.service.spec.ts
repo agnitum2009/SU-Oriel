@@ -8,7 +8,7 @@ import Fastify from "fastify";
 import { test, vi } from "vitest";
 
 import { assertTargetBelongsTo } from "./slot-terminal.guard.js";
-import { SlotTerminalTargetForbiddenError } from "./slot-terminal.errors.js";
+import { SlotTerminalNotFoundError, SlotTerminalTargetForbiddenError } from "./slot-terminal.errors.js";
 import { registerSlotTerminalRoutes } from "./slot-terminal.routes.js";
 import {
   SlotTerminalService,
@@ -185,6 +185,114 @@ test("assertTargetBelongsTo rejects cross-slot, cross-project, cross-pane, and n
   );
 });
 
+test("GET agent-terminal main returns strict claude/codex tmux targets", async () => {
+  const fixture = await createAgentGroupFixture();
+  const app = Fastify();
+  await app.register(registerSlotTerminalRoutes, { service: fixture.service });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${fixture.projectId}/agent-terminal/main`
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json(), {
+      slotId: "main",
+      sessionName: "ccb-su-ccb-test-session",
+      panes: [
+        { role: "claude", target: "%1", paneIndex: 1 },
+        { role: "codex", target: "%2", paneIndex: 2 }
+      ]
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("resolveAgentGroupTerminal rejects non-main groups and duplicate role candidates before first-pick", async () => {
+  const fixture = await createAgentGroupFixture();
+
+  await assert.rejects(
+    () => fixture.service.resolveAgentGroupTerminal({ projectId: fixture.projectId, group: "slot-2" }),
+    SlotTerminalTargetForbiddenError
+  );
+
+  const duplicate = await createAgentGroupFixture({
+    runtimes: [
+      { agentName: "main_claude", provider: "claude", paneId: "%1" },
+      { agentName: "main_claude_duplicate", provider: "claude", paneId: "%3" },
+      { agentName: "main_codex", provider: "codex", paneId: "%2" }
+    ],
+    panes: [
+      { windowName: "main", paneId: "%1", paneIndex: 1 },
+      { windowName: "main", paneId: "%2", paneIndex: 2 },
+      { windowName: "main", paneId: "%3", paneIndex: 3 }
+    ]
+  });
+
+  await assert.rejects(
+    () => duplicate.service.resolveAgentGroupTerminal({ projectId: duplicate.projectId, group: "main" }),
+    SlotTerminalNotFoundError
+  );
+});
+
+test("resolveAgentGroupTerminal rejects candidates with unexpected main agent identity", async () => {
+  const fixture = await createAgentGroupFixture({
+    runtimes: [
+      { agentName: "slot1_claude", provider: "claude", paneId: "%1" },
+      { agentName: "main_codex", provider: "codex", paneId: "%2" }
+    ]
+  });
+
+  await assert.rejects(
+    () => fixture.service.resolveAgentGroupTerminal({ projectId: fixture.projectId, group: "main" }),
+    SlotTerminalNotFoundError
+  );
+});
+
+test("assertTargetBelongsToAgentGroup rejects cross-pane targets and accepts main pane targets", async () => {
+  const fixture = await createAgentGroupFixture();
+
+  await assert.deepEqual(
+    await fixture.service.assertTargetBelongsToAgentGroup({
+      projectId: fixture.projectId,
+      group: "main",
+      role: "claude",
+      target: "%1"
+    }),
+    { role: "claude", target: "%1", paneIndex: 1 }
+  );
+
+  await assert.rejects(
+    () =>
+      fixture.service.assertTargetBelongsToAgentGroup({
+        projectId: fixture.projectId,
+        group: "main",
+        role: "claude",
+        target: "%2"
+      }),
+    SlotTerminalTargetForbiddenError
+  );
+});
+
+test("GET agent-terminal rejects non-main groups", async () => {
+  const fixture = await createAgentGroupFixture();
+  const app = Fastify();
+  await app.register(registerSlotTerminalRoutes, { service: fixture.service });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${fixture.projectId}/agent-terminal/slot-2`
+    });
+
+    assert.equal(response.statusCode, 403, response.body);
+  } finally {
+    await app.close();
+  }
+});
+
 async function writeRuntime(projectRoot: string, agentName: string, record: Record<string, unknown>): Promise<void> {
   const agentDir = join(projectRoot, ".ccb", "agents", agentName);
   await mkdir(agentDir, { recursive: true });
@@ -211,4 +319,57 @@ function createTmuxExecFile(input: {
     }
     return { stdout: "", stderr: "" };
   });
+}
+
+type AgentGroupRuntimeFixture = {
+  agentName: string;
+  provider: "claude" | "codex";
+  paneId: string;
+};
+
+async function createAgentGroupFixture(options: {
+  runtimes?: AgentGroupRuntimeFixture[];
+  panes?: Array<{ windowName: string; paneId: string; paneIndex: number }>;
+} = {}) {
+  const projectId = `project-${randomUUID()}`;
+  const projectRoot = join(tmpdir(), `slot-terminal-main-${randomUUID()}`);
+  const runtimes = options.runtimes ?? [
+    { agentName: "main_claude", provider: "claude", paneId: "%1" },
+    { agentName: "main_codex", provider: "codex", paneId: "%2" }
+  ];
+
+  await writeRuntime(projectRoot, "main_sidebar", {
+    agent_name: "main_sidebar",
+    provider: "sidebar",
+    tmux_window_name: "main",
+    pane_id: "%0"
+  });
+  for (const runtime of runtimes) {
+    await writeRuntime(projectRoot, runtime.agentName, {
+      agent_name: runtime.agentName,
+      provider: runtime.provider,
+      tmux_window_name: "main",
+      pane_id: runtime.paneId
+    });
+  }
+
+  const store = new FakeSlotTerminalStore(
+    new Map([[projectId, { id: projectId, localPath: projectRoot }]]),
+    new Map(),
+    []
+  );
+  const execFile = createTmuxExecFile({
+    sessionName: "ccb-su-ccb-test-session",
+    slotId: "main",
+    panes:
+      options.panes ?? [
+        { windowName: "main", paneId: "%0", paneIndex: 0 },
+        { windowName: "main", paneId: "%2", paneIndex: 2 },
+        { windowName: "main", paneId: "%1", paneIndex: 1 }
+      ]
+  });
+  const runtime = new TmuxSlotTerminalRuntimeResolver({ execFileProcess: execFile });
+  const service = new SlotTerminalService({ store, runtime });
+
+  return { projectId, service, execFile };
 }
