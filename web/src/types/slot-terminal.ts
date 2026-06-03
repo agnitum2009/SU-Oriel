@@ -1,8 +1,21 @@
 export type SlotTerminalPaneRole = "claude" | "codex";
 
-export interface SlotTerminalReadyDescriptor {
+export const SLOT_TERMINAL_ROLES: SlotTerminalPaneRole[] = ["claude", "codex"];
+
+export type SlotTerminalTarget =
+  | {
+      kind: "requirement";
+      projectId: string;
+      requirementId: string;
+    }
+  | {
+      kind: "agentGroup";
+      projectId: string;
+      group: string;
+    };
+
+interface SlotTerminalReadyDescriptorBase {
   projectId: string;
-  requirementId: string;
   slotId: string;
   pane: SlotTerminalPaneRole;
   target: string;
@@ -14,6 +27,14 @@ export interface SlotTerminalReadyDescriptor {
     hidden: "paused";
   };
 }
+
+export type SlotTerminalReadyDescriptor =
+  | (SlotTerminalReadyDescriptorBase & {
+      requirementId: string;
+    })
+  | (SlotTerminalReadyDescriptorBase & {
+      group: string;
+    });
 
 export interface SlotTerminalPaneTarget {
   role: SlotTerminalPaneRole;
@@ -123,7 +144,6 @@ function parseReadyFrame(frame: Record<string, unknown>): SlotTerminalReadyFrame
   const pollingValue = polling as Record<string, unknown>;
   if (
     typeof value.projectId !== "string" ||
-    typeof value.requirementId !== "string" ||
     typeof value.slotId !== "string" ||
     !isSlotTerminalPaneRole(value.pane) ||
     typeof value.target !== "string" ||
@@ -135,23 +155,40 @@ function parseReadyFrame(frame: Record<string, unknown>): SlotTerminalReadyFrame
   ) {
     return null;
   }
-  return {
-    type: "ready",
-    descriptor: {
-      projectId: value.projectId,
-      requirementId: value.requirementId,
-      slotId: value.slotId,
-      pane: value.pane,
-      target: value.target,
-      source: "slot-terminal",
-      readonly: false,
-      polling: {
-        activeMs: pollingValue.activeMs,
-        idleMs: pollingValue.idleMs,
-        hidden: "paused"
-      }
+
+  const descriptorBase = {
+    projectId: value.projectId,
+    slotId: value.slotId,
+    pane: value.pane,
+    target: value.target,
+    source: "slot-terminal" as const,
+    readonly: false as const,
+    polling: {
+      activeMs: pollingValue.activeMs,
+      idleMs: pollingValue.idleMs,
+      hidden: "paused" as const
     }
   };
+
+  if (typeof value.requirementId === "string") {
+    return {
+      type: "ready",
+      descriptor: {
+        ...descriptorBase,
+        requirementId: value.requirementId
+      }
+    };
+  }
+  if (typeof value.group === "string") {
+    return {
+      type: "ready",
+      descriptor: {
+        ...descriptorBase,
+        group: value.group
+      }
+    };
+  }
+  return null;
 }
 
 function parseSnapshotFrame(frame: Record<string, unknown>): SlotTerminalSnapshotFrame | null {

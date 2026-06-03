@@ -20,6 +20,7 @@ import type {
 import type { BurndownView, CreateSprintInput, SprintDetailView, SprintView } from "../types/sprint.js";
 import type { SyncJobView } from "../types/sync-job.js";
 import type { ProjectSettingsPayload, ProjectSettingsView } from "../types/settings.js";
+import type { SlotTerminalDescriptor, SlotTerminalTarget } from "../types/slot-terminal.js";
 import type {
   ConsumeReviewIntentInput,
   ConsumeReviewIntentResponse,
@@ -203,6 +204,21 @@ export async function spawnMainTerminal(projectId: string): Promise<AnchorNative
       method: "POST"
     }
   );
+}
+
+export async function fetchTerminalDescriptor(target: SlotTerminalTarget): Promise<SlotTerminalDescriptor> {
+  const response = await fetch(buildApiUrl(buildTerminalDescriptorPath(target)));
+  if (!response.ok) {
+    throw new Error(response.status === 404 ? "slot terminal unavailable" : `slot terminal resolver failed: ${response.status}`);
+  }
+  return (await response.json()) as SlotTerminalDescriptor;
+}
+
+export function buildTerminalDescriptorPath(target: SlotTerminalTarget): string {
+  if (target.kind === "requirement") {
+    return `/api/projects/${encodeURIComponent(target.projectId)}/requirements/${encodeURIComponent(target.requirementId)}/slot-terminal`;
+  }
+  return `/api/projects/${encodeURIComponent(target.projectId)}/agent-terminal/${encodeURIComponent(target.group)}`;
 }
 
 export async function refreshProjectRequirementStatus(
