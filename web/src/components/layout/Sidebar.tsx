@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router";
 
+import { fetchVersion, type SuOrielVersion } from "../../lib/console-api.js";
 import { getTaskAttentionSummary } from "../../lib/node-board-config.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import type { ProjectView } from "../../types/project.js";
@@ -65,8 +66,26 @@ export function Sidebar(props: SidebarProps) {
   const tasks = useProjectStore((state) => state.tasks);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [keyword, setKeyword] = useState("");
+  const [versionInfo, setVersionInfo] = useState<SuOrielVersion | null>(null);
   const selectedProject = props.projects.find((project) => project.id === props.selectedProjectId) ?? null;
   const taskAttention = useMemo(() => getTaskAttentionSummary(tasks), [tasks]);
+  const displayVersion = versionInfo
+    ? `su-oriel v${versionInfo.version} · ${versionInfo.gitSha || "unknown"}`
+    : "su-oriel v0.1.0 · unknown";
+
+  useEffect(() => {
+    let active = true;
+    void fetchVersion()
+      .then((nextVersion) => {
+        if (active) {
+          setVersionInfo(nextVersion);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredProjects = useMemo(() => {
     const normalized = keyword.trim().toLowerCase();
@@ -183,6 +202,9 @@ export function Sidebar(props: SidebarProps) {
       <AiCliPanel collapsed={sidebarCollapsed} />
 
       <div className={styles.footer}>
+        <div className={styles.versionStamp} title={versionInfo?.buildDate ? `built ${versionInfo.buildDate}` : displayVersion}>
+          {sidebarCollapsed ? `v${versionInfo?.version ?? "0.1.0"}` : displayVersion}
+        </div>
         <Button onClick={props.onCreateProject} size="sm" variant="ghost">
           {sidebarCollapsed ? "＋" : "新建项目"}
         </Button>

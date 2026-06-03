@@ -4,6 +4,7 @@ import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 
 import { prisma } from "./db/prisma.js";
+import { SU_ORIEL_VERSION } from "./generated/version.js";
 import {
   FileWatcherService,
   isFileWatcherEnabled,
@@ -120,8 +121,13 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
   app.get("/api/health", async () => {
     return {
       status: "ok",
-      message: "服务运行正常"
+      message: "服务运行正常",
+      version: SU_ORIEL_VERSION
     };
+  });
+
+  app.get("/api/version", async () => {
+    return SU_ORIEL_VERSION;
   });
 
   const watcherEnabled = dependencies.enableFileWatcher ?? isFileWatcherEnabled(process.env.CCB_INDEXER_WATCH);

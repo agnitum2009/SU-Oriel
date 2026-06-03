@@ -111,9 +111,9 @@ test("TaskRun Prisma model persists attempt and transition journal fields", asyn
   assert.deepEqual(JSON.parse(run.transitionsJson), [{ from: "pending", to: "dispatched", attempt_n: 1 }]);
 });
 
-test("TaskRun state-machine document records transitions, terminal states, and attempt_n idempotency", async () => {
+test("TaskRun state-machine document records transitions, terminal states, and attempt tracking", async () => {
   const doc = await readFile(
-    resolve(resolveCcbProjectRoot(), "docs/04_模块规格/ccb-console-task-run-state-machine模块规格.md"),
+    resolve(resolveCcbProjectRoot(), "docs/04_模块规格/su-oriel-taskrun状态机模块规格.md"),
     "utf8"
   );
 
@@ -122,8 +122,9 @@ test("TaskRun state-machine document records transitions, terminal states, and a
   assert.match(doc, /completed/);
   assert.match(doc, /cancelled/);
   assert.match(doc, /failed-terminal/);
-  assert.match(doc, /attempt_n/);
-  assert.match(doc, /幂等/);
+  assert.match(doc, /attemptN/);
+  assert.match(doc, /attempt 变化/);
+  assert.match(doc, /\+1/);
 });
 
 afterAll(async () => {

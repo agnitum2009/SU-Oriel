@@ -10,6 +10,12 @@ import type { TaskDetailView, TaskTimelineView, TaskView } from "../types/task.j
 
 vi.mock("../lib/console-api.js", () => ({
   buildApiUrl: vi.fn((path: string) => path),
+  fetchVersion: vi.fn().mockResolvedValue({
+    name: "su-oriel-server",
+    version: "0.1.0",
+    gitSha: "unknown",
+    buildDate: ""
+  }),
   fetchProjects: vi.fn(),
   createProject: vi.fn(),
   scanProject: vi.fn(),

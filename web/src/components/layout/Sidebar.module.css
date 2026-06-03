@@ -218,6 +218,16 @@
   border-top: 1px solid var(--sidebar-border);
 }
 
+.versionStamp {
+  overflow: hidden;
+  padding: 0 10px;
+  color: var(--cc-color-gray-500);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settingsPlaceholder {
   padding: 6px 10px;
   color: var(--cc-color-gray-500);

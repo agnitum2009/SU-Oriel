@@ -46,6 +46,13 @@ interface ApiMessageResponse {
   retryAfter?: string;
 }
 
+export interface SuOrielVersion {
+  name: string;
+  version: string;
+  gitSha: string;
+  buildDate: string;
+}
+
 export class ConsoleApiError extends Error {
   constructor(
     message: string,
@@ -121,6 +128,10 @@ function optionalText(value: string): string | undefined {
 export async function fetchProjects(): Promise<ProjectView[]> {
   const payload = await requestJson<ApiListResponse<ProjectView>>("/api/projects", "加载项目列表失败");
   return payload.items;
+}
+
+export async function fetchVersion(): Promise<SuOrielVersion> {
+  return await requestJson<SuOrielVersion>("/api/version", "加载版本信息失败");
 }
 
 export async function createProject(input: {
