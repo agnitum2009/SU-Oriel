@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { beforeEach, test, vi } from "vitest";
+import { beforeEach, test } from "vitest";
 
 import { buildApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
@@ -71,34 +71,7 @@ async function createSubtask(input: {
 }
 
 function buildBatchApp() {
-  return buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: vi.fn(async (input) => ({ anchorPath: input.anchorPath, branch: "task/batch" })),
-        remove: vi.fn(),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn()
-      },
-      anchorTemplate: {
-        buildConfig: () => "",
-        writeConfig: vi.fn(async () => "/tmp/.ccb/ccb.config")
-      },
-      ccbdLauncher: {
-        start: vi.fn(async () => ({ pid: 123, socketPath: "/tmp/subtask-batch-ready.sock" })),
-        kill: vi.fn()
-      },
-      askRouter: {
-        askAcrossAnchor: vi.fn(async () => ({ jobId: "job_start_ask", traceRef: "trace_start_ask" }))
-      },
-      waitForClaudeTuiReady: vi.fn(async () => ({
-        ready: true,
-        elapsedMs: 1,
-        lastTitles: ["Claude Code"]
-      }))
-    }
-  });
+  return buildApp({ enableFileWatcher: false });
 }
 
 beforeEach(async () => {

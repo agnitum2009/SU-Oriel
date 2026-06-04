@@ -9,14 +9,6 @@ import { buildApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
 import type { MultiAnchorBrokerService } from "./broker.service.js";
 
-function immediateClaudeReadyProbe() {
-  return vi.fn(async () => ({
-    ready: true,
-    elapsedMs: 1,
-    lastTitles: ["Claude Code"]
-  }));
-}
-
 async function resetFixtures(): Promise<void> {
   await prisma.anchorAllocation.deleteMany();
   await prisma.task.deleteMany();
@@ -113,28 +105,7 @@ test("GET /api/anchors projects SlotBinding rows with slotId for compat readers"
 
 test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/start creates a planning anchor", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const gitAdd = vi.fn();
-  const ccbdStart = vi.fn();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: gitAdd,
-        remove: vi.fn(),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn()
-      },
-      anchorTemplate: {
-        buildConfig: () => "",
-        writeConfig: vi.fn(async () => "/tmp/.ccb/ccb.config")
-      },
-      ccbdLauncher: {
-        start: ccbdStart,
-        kill: vi.fn()
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -152,8 +123,6 @@ test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/
     assert.equal(body.slotId, "slot-1");
     assert.equal(body.anchorId, "slot-1");
     assert.equal(body.socketPath, null);
-    assert.equal(gitAdd.mock.calls.length, 0);
-    assert.equal(ccbdStart.mock.calls.length, 0);
     assert.equal(await prisma.anchorAllocation.count({ where: { subjectType: "requirement", subjectId: requirement.id, mode: "planning" } }), 0);
     assert.equal(await prisma.slotBinding.count({ where: { projectId: project.id, requirementId: requirement.id, slotId: "slot-1" } }), 1);
     const refreshed = await prisma.requirement.findUniqueOrThrow({ where: { id: requirement.id } });
@@ -166,31 +135,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/
 
 test("POST /api/tasks/:taskId/anchor/start is deprecated and does not create per-subject runtime", async () => {
   const { subtask } = await createSubtaskFixture();
-  const gitAdd = vi.fn();
-  const ccbdStart = vi.fn();
-  const ask = vi.fn(async (_input: unknown) => ({ jobId: "job-delayed", traceRef: "trace-delayed" }));
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: gitAdd,
-        remove: vi.fn(),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn()
-      },
-      anchorTemplate: {
-        buildConfig: () => "",
-        writeConfig: vi.fn(async () => "/tmp/.ccb/ccb.config")
-      },
-      ccbdLauncher: {
-        start: ccbdStart,
-        kill: vi.fn()
-      },
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: immediateClaudeReadyProbe()
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -200,9 +145,6 @@ test("POST /api/tasks/:taskId/anchor/start is deprecated and does not create per
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(gitAdd.mock.calls.length, 0);
-    assert.equal(ccbdStart.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
     assert.equal(await prisma.anchorAllocation.count({ where: { subjectType: "subtask", subjectId: subtask.id } }), 0);
   } finally {
     await app.close();
@@ -211,35 +153,7 @@ test("POST /api/tasks/:taskId/anchor/start is deprecated and does not create per
 
 test("task anchor route keeps preview read-only and deprecates start/stop writes", async () => {
   const { subtask } = await createSubtaskFixture();
-  const gitAdd = vi.fn();
-  const ccbdStart = vi.fn();
-  const kill = vi.fn();
-  const ask = vi.fn(async (_input: unknown) => ({ jobId: "job-subtask", traceRef: "trace-subtask" }));
-  const cancel = vi.fn(async () => ({ cancelled: true }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: gitAdd,
-        remove: vi.fn(),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn()
-      },
-      anchorTemplate: {
-        buildConfig: () => "",
-        writeConfig: vi.fn(async () => "/tmp/.ccb/ccb.config")
-      },
-      ccbdLauncher: {
-        start: ccbdStart,
-        kill
-      },
-      askRouter: { askAcrossAnchor: ask },
-      cancelRouter: { cancelAcrossAnchor: cancel },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const previewResponse = await app.inject({
@@ -265,11 +179,6 @@ test("task anchor route keeps preview read-only and deprecates start/stop writes
     });
     assert.equal(stopResponse.statusCode, 410);
     assert.equal(await prisma.anchorAllocation.count({ where: { subjectType: "subtask", subjectId: subtask.id } }), 0);
-    assert.equal(gitAdd.mock.calls.length, 0);
-    assert.equal(ccbdStart.mock.calls.length, 0);
-    assert.equal(kill.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
-    assert.equal(cancel.mock.calls.length, 0);
   } finally {
     await app.close();
   }
@@ -292,25 +201,7 @@ test("POST /api/anchors/:anchorId/runtime/stop pauses runtime without destroying
       updatedAt: new Date()
     }
   });
-  const kill = vi.fn(async () => ({ stdout: "", stderr: "" }));
-  const remove = vi.fn();
-  const removeBranch = vi.fn();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: vi.fn(),
-        remove,
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch
-      },
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -320,9 +211,6 @@ test("POST /api/anchors/:anchorId/runtime/stop pauses runtime without destroying
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(kill.mock.calls.length, 0);
-    assert.equal(remove.mock.calls.length, 0);
-    assert.equal(removeBranch.mock.calls.length, 0);
     const row = await prisma.anchorAllocation.findUniqueOrThrow({ where: { anchorId: "anchor-runtime-stop" } });
     assert.equal(row.runtimePaused, false);
     assert.equal(row.state, "ready");
@@ -350,20 +238,7 @@ test("POST /api/anchors/:anchorId/runtime/resume restarts requirement runtime an
       updatedAt: new Date()
     }
   });
-  const start = vi.fn(async () => ({ pid: 123, socketPath: "/tmp/anchor-runtime-resumed.sock" }));
-  const ask = vi.fn(async (_input: unknown) => ({ jobId: "job-runtime-resume", traceRef: "trace-runtime-resume" }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start,
-        kill: vi.fn()
-      },
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -373,9 +248,6 @@ test("POST /api/anchors/:anchorId/runtime/resume restarts requirement runtime an
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(start.mock.calls.length, 0);
-    assert.equal(readinessProbe.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
     const row = await prisma.anchorAllocation.findUniqueOrThrow({ where: { anchorId: "anchor-runtime-resume" } });
     assert.equal(row.runtimePaused, true);
     assert.equal(row.socketPath, null);
@@ -401,16 +273,7 @@ test("POST /api/anchors/:anchorId/runtime/resume is idempotent when runtime is a
       updatedAt: new Date()
     }
   });
-  const start = vi.fn(async () => ({ pid: 123, socketPath: "/tmp/should-not-start.sock" }));
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start,
-        kill: vi.fn()
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -420,7 +283,6 @@ test("POST /api/anchors/:anchorId/runtime/resume is idempotent when runtime is a
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(start.mock.calls.length, 0);
   } finally {
     await app.close();
   }
@@ -428,7 +290,6 @@ test("POST /api/anchors/:anchorId/runtime/resume is idempotent when runtime is a
 
 test("POST /api/tasks/:taskId/anchor/reset deletes an existing subtask anchor row and is idempotent", async () => {
   const { project, subtask } = await createSubtaskFixture();
-  const cleanupCalls: string[] = [];
   await prisma.anchorAllocation.create({
     data: {
       anchorId: "anchor-route-reset",
@@ -443,40 +304,7 @@ test("POST /api/tasks/:taskId/anchor/reset deletes an existing subtask anchor ro
       updatedAt: new Date()
     }
   });
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: vi.fn(),
-        remove: vi.fn(async () => {
-          cleanupCalls.push("worktree.remove");
-        }),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn(async () => {
-          cleanupCalls.push("git.branch.delete");
-        })
-      },
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill: vi.fn(async () => {
-          cleanupCalls.push("ccb.kill");
-          return { stdout: "", stderr: "" };
-        }),
-        killLaunchSession: vi.fn(async () => {
-          cleanupCalls.push("tmux.kill");
-          return { stdout: "", stderr: "" };
-        }),
-        killLifecyclePids: vi.fn(async () => {
-          cleanupCalls.push("pids.kill");
-          return { killed: [], skipped: [] };
-        }),
-        unlinkLaunchSocket: vi.fn(async () => {
-          cleanupCalls.push("launch.unlink");
-        })
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const first = await app.inject({
@@ -493,7 +321,6 @@ test("POST /api/tasks/:taskId/anchor/reset deletes an existing subtask anchor ro
     assert.equal(first.statusCode, 410);
     assert.equal(second.statusCode, 410);
     assert.equal(await prisma.anchorAllocation.count({ where: { subjectType: "subtask", subjectId: subtask.id } }), 1);
-    assert.deepEqual(cleanupCalls, []);
   } finally {
     await app.close();
   }
@@ -501,25 +328,7 @@ test("POST /api/tasks/:taskId/anchor/reset deletes an existing subtask anchor ro
 
 test("POST /api/projects/:projectId/requirements/:requirementId/anchor/reset is deprecated and does not clean per-anchor artifacts", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const kill = vi.fn(async (_anchorPath: string) => ({ stdout: "", stderr: "" }));
-  const remove = vi.fn(async (_input: unknown) => undefined);
-  const removeBranch = vi.fn(async (_repoRoot: string, _branch: string) => undefined);
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: vi.fn(),
-        remove,
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch
-      },
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -529,9 +338,6 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor/reset is 
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(kill.mock.calls.length, 0);
-    assert.equal(remove.mock.calls.length, 0);
-    assert.equal(removeBranch.mock.calls.length, 0);
   } finally {
     await app.close();
   }

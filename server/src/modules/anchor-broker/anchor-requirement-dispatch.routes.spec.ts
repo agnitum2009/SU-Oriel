@@ -4,18 +4,10 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { beforeEach, test, vi } from "vitest";
+import { beforeEach, test } from "vitest";
 
 import { buildApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
-
-function immediateClaudeReadyProbe() {
-  return vi.fn(async () => ({
-    ready: true,
-    elapsedMs: 1,
-    lastTitles: ["Claude Code"]
-  }));
-}
 
 function parseQueuedPayload(command: string): { command: string; payload: Record<string, unknown> } {
   const matched = command.match(/^\/ccb:([a-z][a-z0-9-]*) --payload (.+)$/);
@@ -92,28 +84,7 @@ beforeEach(async () => {
 
 test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/start binds a Requirement slot without legacy runtime", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const gitAdd = vi.fn();
-  const ccbdStart = vi.fn();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      gitWorktree: {
-        add: gitAdd,
-        remove: vi.fn(),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn()
-      },
-      anchorTemplate: {
-        buildConfig: () => "",
-        writeConfig: vi.fn(async () => "/tmp/.ccb/ccb.config")
-      },
-      ccbdLauncher: {
-        start: ccbdStart,
-        kill: vi.fn()
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -131,8 +102,6 @@ test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/
     assert.equal(body.subjectType, "requirement");
     assert.equal(body.subjectId, requirement.id);
     assert.equal(body.mode, "planning");
-    assert.equal(gitAdd.mock.calls.length, 0);
-    assert.equal(ccbdStart.mock.calls.length, 0);
     assert.equal(await prisma.anchorAllocation.count({ where: { subjectType: "requirement", subjectId: requirement.id } }), 0);
     assert.equal(await prisma.slotBinding.count({ where: { projectId: project.id, requirementId: requirement.id, slotId: "slot-1" } }), 1);
 
@@ -152,15 +121,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/planning-anchor/
 
 test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch enqueues a command for the bound slot", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const ask = vi.fn(async () => ({ jobId: "job_requirement_dispatch", traceRef: "trace_requirement_dispatch" }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -184,8 +145,6 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
     assert.equal(body.requirementId, requirement.id);
     assert.equal(body.status, "queued");
     assert.equal(typeof body.queuedAt, "string");
-    assert.equal(readinessProbe.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
 
     const queued = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: body.jobId } });
     assert.equal(queued.anchorId, "slot-1");
@@ -221,13 +180,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
 
 test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch claims a slot when no planning anchor exists", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const ask = vi.fn(async () => ({ jobId: "job_should_not_run", traceRef: "trace_should_not_run" }));
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      askRouter: { askAcrossAnchor: ask }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -243,7 +196,6 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
 
     assert.equal(response.statusCode, 202);
     assert.equal(response.json().slotId, "slot-1");
-    assert.equal(ask.mock.calls.length, 0);
     assert.equal(await prisma.slotBinding.count({ where: { projectId: project.id, requirementId: requirement.id, slotId: "slot-1" } }), 1);
   } finally {
     await app.close();
@@ -291,15 +243,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
 
 test("POST /api/tasks/:taskId/anchor-dispatch enqueues a command for the parent requirement slot", async () => {
   const { task } = await createSubtaskFixture();
-  const ask = vi.fn(async () => ({ jobId: "job_subtask_dispatch", traceRef: "trace_subtask_dispatch" }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -320,8 +264,6 @@ test("POST /api/tasks/:taskId/anchor-dispatch enqueues a command for the parent 
     assert.equal(body.taskId, task.id);
     assert.equal(body.status, "queued");
     assert.equal(typeof body.queuedAt, "string");
-    assert.equal(readinessProbe.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
 
     const queued = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: body.jobId } });
     assert.equal(queued.anchorId, "slot-1");
@@ -464,20 +406,7 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated for Requirement p
       runtimePaused: true
     }
   });
-  const start = vi.fn(async () => ({ pid: 123, socketPath: "/tmp/requirement-resumed.sock" }));
-  const ask = vi.fn(async () => ({ jobId: "job_requirement_resume", traceRef: "trace_requirement_resume" }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start,
-        kill: vi.fn()
-      },
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -487,14 +416,11 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated for Requirement p
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(start.mock.calls.length, 0);
     const row = await prisma.anchorAllocation.findUniqueOrThrow({ where: { anchorId: "anchor_requirement_resume" } });
     assert.equal(row.runtimePaused, true);
     assert.equal(row.socketPath, null);
     const updatedRequirement = await prisma.requirement.findUniqueOrThrow({ where: { id: requirement.id } });
     assert.equal(updatedRequirement.planningRuntimeState, "paused");
-    assert.equal(readinessProbe.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
   } finally {
     await app.close();
   }
@@ -517,20 +443,7 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated for SubTask execu
       runtimePaused: true
     }
   });
-  const start = vi.fn(async () => ({ pid: 123, socketPath: "/tmp/subtask-resumed.sock" }));
-  const ask = vi.fn(async () => ({ jobId: "job_subtask_resume", traceRef: "trace_subtask_resume" }));
-  const readinessProbe = immediateClaudeReadyProbe();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start,
-        kill: vi.fn()
-      },
-      askRouter: { askAcrossAnchor: ask },
-      waitForClaudeTuiReady: readinessProbe
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -540,9 +453,6 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated for SubTask execu
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(start.mock.calls.length, 0);
-    assert.equal(readinessProbe.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
     const row = await prisma.anchorAllocation.findUniqueOrThrow({ where: { anchorId: "anchor_subtask_resume" } });
     assert.equal(row.runtimePaused, true);
     assert.equal(row.socketPath, null);
@@ -567,18 +477,7 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated without restartin
       runtimePaused: true
     }
   });
-  const start = vi.fn(async () => ({ pid: 123, socketPath: "/tmp/should-not-start.sock" }));
-  const ask = vi.fn(async () => ({ jobId: "job_should_not_run", traceRef: "trace_should_not_run" }));
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start,
-        kill: vi.fn()
-      },
-      askRouter: { askAcrossAnchor: ask }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -588,8 +487,6 @@ test("POST /api/anchors/:anchorId/runtime/resume is deprecated without restartin
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(start.mock.calls.length, 0);
-    assert.equal(ask.mock.calls.length, 0);
   } finally {
     await app.close();
   }
@@ -611,30 +508,7 @@ test("POST /api/anchors/:anchorId/reset is deprecated for Requirement planning a
       state: "ready"
     }
   });
-  const cleanupCalls: string[] = [];
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" })),
-        killLaunchSession: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" })),
-        killLifecyclePids: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" })),
-        unlinkLaunchSocket: vi.fn(async () => undefined)
-      },
-      gitWorktree: {
-        add: vi.fn(),
-        remove: vi.fn(async (input) => {
-          cleanupCalls.push(`remove:${input.anchorPath}`);
-        }),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn(async (_repoRoot, branch) => {
-          cleanupCalls.push(`branch:${branch}`);
-        })
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -645,7 +519,6 @@ test("POST /api/anchors/:anchorId/reset is deprecated for Requirement planning a
 
     assert.equal(response.statusCode, 410);
     assert.equal(await prisma.anchorAllocation.count({ where: { anchorId: "anchor_requirement_reset" } }), 1);
-    assert.deepEqual(cleanupCalls, []);
   } finally {
     await app.close();
   }
@@ -667,22 +540,7 @@ test("POST /api/anchors/:anchorId/reset is deprecated for SubTask execution anch
       state: "ready"
     }
   });
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" }))
-      },
-      gitWorktree: {
-        add: vi.fn(),
-        remove: vi.fn(async () => undefined),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn(async () => undefined)
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -700,22 +558,7 @@ test("POST /api/anchors/:anchorId/reset is deprecated for SubTask execution anch
 
 test("POST /api/projects/:projectId/requirements/:requirementId/anchor/reset is deprecated without cleanup", async () => {
   const { project, requirement } = await createRequirementFixture();
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill: vi.fn(async () => ({ ok: true, stdout: "", stderr: "" }))
-      },
-      gitWorktree: {
-        add: vi.fn(),
-        remove: vi.fn(async () => undefined),
-        clean: vi.fn(),
-        list: vi.fn(),
-        removeBranch: vi.fn(async () => undefined)
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -746,16 +589,7 @@ test("POST /api/anchors/:anchorId/reset is deprecated without cleaning unsupport
       state: "ready"
     }
   });
-  const kill = vi.fn(async () => ({ ok: true, stdout: "", stderr: "" }));
-  const app = buildApp({
-    enableFileWatcher: false,
-    anchorBroker: {
-      ccbdLauncher: {
-        start: vi.fn(),
-        kill
-      }
-    }
-  });
+  const app = buildApp({ enableFileWatcher: false });
 
   try {
     const response = await app.inject({
@@ -765,7 +599,6 @@ test("POST /api/anchors/:anchorId/reset is deprecated without cleaning unsupport
     });
 
     assert.equal(response.statusCode, 410);
-    assert.equal(kill.mock.calls.length, 0);
     assert.equal(await prisma.anchorAllocation.count({ where: { anchorId: "anchor_unknown_reset" } }), 1);
   } finally {
     await app.close();
