@@ -285,6 +285,13 @@ export async function fetchRequirementMarkdown(
   );
 }
 
+export async function fetchTaskMarkdown(projectId: string, taskId: string): Promise<RequirementMarkdownView> {
+  return await requestJson<RequirementMarkdownView>(
+    `/api/projects/${projectId}/tasks/${taskId}/markdown`,
+    "加载任务文档失败"
+  );
+}
+
 export async function fetchTasks(projectId: string): Promise<TaskView[]> {
   const payload = await requestJson<ApiListResponse<TaskView>>(`/api/projects/${projectId}/tasks`, "加载任务列表失败");
   return payload.items;

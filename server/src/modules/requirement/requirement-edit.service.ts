@@ -7,8 +7,11 @@ import type { PrismaClient, Requirement } from "@prisma/client";
 import { parseDocument, parseRequirementSections } from "../../indexer/document-parser.js";
 import { getDocsStructureResolverForProject } from "../../indexer/docs-structure-resolver.js";
 import { syncRequirementsFromMarkdown } from "../../indexer/project-indexer.js";
+import { extractMarkdownBody } from "../../lib/markdown.js";
 import { primitiveExecutor } from "../primitive/primitive-wrapper.js";
 import { hashRequirementAnalysisInput } from "./requirement-analysis-hash.js";
+
+export { extractMarkdownBody } from "../../lib/markdown.js";
 
 const EDITABLE_REQUIREMENT_STATUSES = new Set(["drafting", "planning", "delivering", "deferred"]);
 
@@ -98,11 +101,6 @@ export async function findRequirementMarkdown(projectRoot: string, requirementId
   }
 
   throw new RequirementEditNotFoundError("需求 md 文件不存在");
-}
-
-export function extractMarkdownBody(content: string): string {
-  const matched = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
-  return matched ? matched[1] : content;
 }
 
 function escapeYamlScalar(value: string): string {

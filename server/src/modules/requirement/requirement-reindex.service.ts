@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import type { PrismaClient } from "@prisma/client";
 import { ZodError } from "zod";
@@ -15,6 +15,7 @@ import {
   type DeriveTaskDocument,
   type VerifyAnomaly
 } from "../../indexer/project-indexer.js";
+import { resolveProjectPath } from "../../lib/project-path.js";
 import { primitiveExecutor } from "../primitive/primitive-wrapper.js";
 import { findRequirementMarkdown, RequirementEditNotFoundError } from "./requirement-edit.service.js";
 
@@ -559,15 +560,6 @@ async function loadProjectRoot(prisma: PrismaClient, projectId: string): Promise
     throw new RequirementEditNotFoundError("项目不存在");
   }
   return resolve(project.localPath);
-}
-
-function resolveProjectPath(projectRoot: string, filePath: string): { absolutePath: string; relativePath: string } {
-  const absolutePath = isAbsolute(filePath) ? resolve(filePath) : resolve(projectRoot, filePath);
-  const relativePath = relative(projectRoot, absolutePath).replace(/\\/g, "/");
-  if (!relativePath || relativePath.startsWith("../") || relativePath === ".." || isAbsolute(relativePath)) {
-    throw new Error(`artifact path escapes project root: ${filePath}`);
-  }
-  return { absolutePath, relativePath };
 }
 
 function extractMarkdownBody(content: string): string {

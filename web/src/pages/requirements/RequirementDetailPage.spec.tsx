@@ -28,6 +28,7 @@ vi.mock("../../lib/console-api.js", () => ({
   fetchRequirementMarkdown: vi.fn(),
   fetchSlots: vi.fn(),
   fetchSubtaskBatchCandidates: vi.fn(),
+  fetchTaskMarkdown: vi.fn(),
   fetchTerminalDescriptor: vi.fn(
     async (
       target:
@@ -235,6 +236,7 @@ function renderPage() {
       <Routes>
         <Route element={<RequirementDetailPage />} path="/requirements/:requirementId" />
         <Route element={<div>拆分审查页</div>} path="/requirements/:requirementId/breakdown-review" />
+        <Route element={<div data-testid="task-detail-sentinel">任务详情页哨兵</div>} path="/tasks/:taskId" />
       </Routes>
     </MemoryRouter>
   );
@@ -254,6 +256,11 @@ describe("RequirementDetailPage 极简详情页", () => {
     vi.mocked(consoleApi.fetchRequirementMarkdown).mockResolvedValue({
       path: "docs/02_需求设计/req.md",
       content: "# 完整需求文档\n\n需求正文内容"
+    });
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockReset();
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockResolvedValue({
+      path: "docs/03_开发计划/task-1-开发任务.md",
+      content: "# 子任务文档\n\n实现内容"
     });
     vi.mocked(consoleApi.fetchEventJournalEvents).mockReset();
     vi.mocked(consoleApi.fetchEventJournalEvents).mockResolvedValue({ items: [], pageInfo: { limit: 20, offset: 0, count: 0 } });
@@ -592,6 +599,122 @@ describe("RequirementDetailPage 极简详情页", () => {
 
     expect(screen.queryByRole("dialog", { name: "AI 解析 · 需求文档" })).toBeNull();
     expect(screen.queryByText("迟到内容")).toBeNull();
+  });
+
+  it("opens subtask markdown reader in-place without navigating to task detail", async () => {
+    let resolveTaskMarkdown!: (value: { path: string; content: string }) => void;
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(buildRequirement());
+    vi.mocked(consoleApi.fetchTasks).mockResolvedValue([buildSubtask()]);
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveTaskMarkdown = resolve;
+      })
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开子任务" }));
+    const subtaskButton = screen.getByRole("button", { name: /第一个子任务/ });
+    subtaskButton.focus();
+    fireEvent.click(subtaskButton);
+
+    const modal = await screen.findByRole("dialog", { name: "任务文档 · 第一个子任务" });
+    expect(within(modal).getByText("正在加载任务文档...")).toBeInTheDocument();
+    expect(consoleApi.fetchTaskMarkdown).toHaveBeenCalledWith("project-1", "task-1");
+    expect(screen.queryByTestId("task-detail-sentinel")).toBeNull();
+    expect(screen.getByTestId("requirement-detail-page")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveTaskMarkdown({
+        path: "docs/03_开发计划/task-1-开发任务.md",
+        content: "# 子任务文档\n\n实现内容"
+      });
+      await Promise.resolve();
+    });
+
+    expect(await within(modal).findByRole("heading", { name: "子任务文档" })).toBeInTheDocument();
+    expect(within(modal).getByText("实现内容")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole("dialog", { name: "任务文档 · 第一个子任务" })).toBeNull();
+    expect(document.activeElement).toBe(subtaskButton);
+  });
+
+  it("drops late subtask markdown responses when switching from A to B", async () => {
+    let resolveA!: (value: { path: string; content: string }) => void;
+    let resolveB!: (value: { path: string; content: string }) => void;
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(buildRequirement());
+    vi.mocked(consoleApi.fetchTasks).mockResolvedValue([
+      buildSubtask({ id: "task-a", title: "A 子任务", step: 1 }),
+      buildSubtask({ id: "task-b", title: "B 子任务", step: 2 })
+    ]);
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockImplementation((_projectId, taskId) =>
+      new Promise((resolve) => {
+        if (taskId === "task-a") {
+          resolveA = resolve;
+          return;
+        }
+        resolveB = resolve;
+      })
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开子任务" }));
+    fireEvent.click(screen.getByRole("button", { name: /A 子任务/ }));
+    expect(await screen.findByRole("dialog", { name: "任务文档 · A 子任务" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /B 子任务/ }));
+    const modal = await screen.findByRole("dialog", { name: "任务文档 · B 子任务" });
+
+    await act(async () => {
+      resolveB({ path: "docs/03_开发计划/b.md", content: "# B 内容" });
+      await Promise.resolve();
+    });
+    expect(await within(modal).findByRole("heading", { name: "B 内容" })).toBeInTheDocument();
+
+    await act(async () => {
+      resolveA({ path: "docs/03_开发计划/a.md", content: "# A 内容" });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole("heading", { name: "A 内容" })).toBeNull();
+    expect(within(modal).getByRole("heading", { name: "B 内容" })).toBeInTheDocument();
+  });
+
+  it("shows a not-found fallback when the subtask markdown endpoint returns 404", async () => {
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(buildRequirement());
+    vi.mocked(consoleApi.fetchTasks).mockResolvedValue([buildSubtask()]);
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockRejectedValue(
+      new consoleApi.ConsoleApiError("Not Found", 404)
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开子任务" }));
+    fireEvent.click(screen.getByRole("button", { name: /第一个子任务/ }));
+
+    const modal = await screen.findByRole("dialog", { name: "任务文档 · 第一个子任务" });
+    expect(await within(modal).findByText("任务文档不存在或尚未进入索引")).toBeInTheDocument();
+  });
+
+  it("shows an empty fallback when the subtask markdown body is empty", async () => {
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(buildRequirement());
+    vi.mocked(consoleApi.fetchTasks).mockResolvedValue([buildSubtask()]);
+    vi.mocked(consoleApi.fetchTaskMarkdown).mockResolvedValue({
+      path: "docs/03_开发计划/task-1-开发任务.md",
+      content: "   "
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开子任务" }));
+    fireEvent.click(screen.getByRole("button", { name: /第一个子任务/ }));
+
+    const modal = await screen.findByRole("dialog", { name: "任务文档 · 第一个子任务" });
+    expect(await within(modal).findByText("任务文档正文为空")).toBeInTheDocument();
   });
 
   it("shows only generate action when AI analysis is missing", async () => {
