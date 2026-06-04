@@ -16,14 +16,16 @@ export interface SlotTerminalWritableTerminal {
 
 export class SlotTerminalFrameRenderer {
   private readonly terminal: SlotTerminalWritableTerminal;
+  private readonly scrollHost: HTMLElement | null;
   private pendingFrame: SlotTerminalSnapshotFrame | null = null;
   private animationFrame: number | null = null;
   private lastGeneration = 0;
   private lastFrameKey: string | null = null;
   private lastSizeKey: string | null = null;
 
-  constructor(terminal: SlotTerminalWritableTerminal) {
+  constructor(terminal: SlotTerminalWritableTerminal, scrollHost: HTMLElement | null = null) {
     this.terminal = terminal;
+    this.scrollHost = scrollHost;
   }
 
   applyFrame(frame: SlotTerminalSnapshotFrame): void {
@@ -64,16 +66,21 @@ export class SlotTerminalFrameRenderer {
     const cols = normalizeTerminalDimension(frame.cols);
     const rows = normalizeTerminalDimension(frame.rows);
     const sizeKey = `${cols}x${rows}`;
+    // 跟随判定必须在 resize 之前测：resize 会改变 xterm 行数与 host.scrollHeight，
+    // 之后再测会把"原本贴底"误判成"已离底"。双底部 = xterm 历史在底 且 host 外滚在底。
+    const shouldFollow = isTerminalAtBottom(this.terminal) && isHostAtBottom(this.scrollHost);
     if (sizeKey !== this.lastSizeKey) {
       this.terminal.resize(cols, rows);
       this.lastSizeKey = sizeKey;
     }
     const data = stripTrailingFrameNewline(frame.data);
     const payload = frame.initial ? data : `${SLOT_TERMINAL_FULL_FRAME_CLEAR}${data}`;
-    const shouldFollow = isTerminalAtBottom(this.terminal);
     this.terminal.write(payload, () => {
       if (shouldFollow) {
         this.terminal.scrollToBottom?.();
+        if (this.scrollHost) {
+          this.scrollHost.scrollTop = this.scrollHost.scrollHeight;
+        }
       }
     });
   }
@@ -89,6 +96,15 @@ function isTerminalAtBottom(terminal: SlotTerminalWritableTerminal): boolean {
     return true;
   }
   return activeBuffer.viewportY >= activeBuffer.baseY;
+}
+
+// host 外层滚动是否在底部。无 host（旧调用 / 单测）时视为在底，保持向后兼容。
+const HOST_AT_BOTTOM_EPSILON = 2;
+function isHostAtBottom(host: HTMLElement | null): boolean {
+  if (!host) {
+    return true;
+  }
+  return host.scrollTop + host.clientHeight >= host.scrollHeight - HOST_AT_BOTTOM_EPSILON;
 }
 
 function normalizeTerminalDimension(value: number): number {

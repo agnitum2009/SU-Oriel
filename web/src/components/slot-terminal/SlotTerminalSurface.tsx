@@ -81,7 +81,7 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
     if (!terminal) {
       return;
     }
-    const renderer = new SlotTerminalFrameRenderer(terminal);
+    const renderer = new SlotTerminalFrameRenderer(terminal, containerRef.current);
     rendererRef.current = renderer;
     setStatus("connecting");
     setLastError(null);
@@ -161,6 +161,48 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
     host.addEventListener("paste", onPaste, true);
     return () => host.removeEventListener("paste", onPaste, true);
   }, [containerRef, terminal]);
+
+  // 滚轮仲裁（Opt-1a'·capture-phase）：纵向只保留一根可见 host 条。
+  // host 滚"当前屏溢出"，到边界后把滚轮交给 xterm scrollback 看历史 → "单条 + 历史可达"。
+  // ⚠ 需浏览器实测调参（trackpad delta / 快速滚动）；只读镜像不向 pane 转发 wheel，故不涉 mouse-tracking。
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host || !terminal) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      const dy = event.deltaY;
+      if (dy === 0) {
+        return;
+      }
+      const atHostTop = host.scrollTop <= 0;
+      const atHostBottom = host.scrollTop + host.clientHeight >= host.scrollHeight - 1;
+      const active = terminal.buffer?.active;
+      const historyAtBottom = !active || active.viewportY >= active.baseY;
+      const lines = Math.max(1, Math.round(Math.abs(dy) / 16));
+      if (dy < 0) {
+        // 上滚：host 还能上滚 → 滚 host 看当前屏上半；host 到顶 → 进 xterm 历史
+        if (!atHostTop) {
+          host.scrollTop += dy;
+        } else {
+          terminal.scrollLines(-lines);
+        }
+      } else {
+        // 下滚：历史未回到 live → 先把 xterm 拉回底；回到 live 后让 host 滚到当前屏底
+        if (!historyAtBottom) {
+          terminal.scrollLines(lines);
+        } else if (!atHostBottom) {
+          host.scrollTop += dy;
+        } else {
+          return; // 已在最底，交回默认
+        }
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    host.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => host.removeEventListener("wheel", onWheel, { capture: true } as EventListenerOptions);
+  }, [terminal]);
 
   // 右键菜单：点击别处 / 滚动 / Esc 关闭。
   useEffect(() => {

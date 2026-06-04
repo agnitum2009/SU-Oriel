@@ -61,8 +61,9 @@
   min-height: 0;
   /* 横向：tmux pane 列数（renderer 按 frame.cols resize）常宽于右栏，需横向滚动条看全。 */
   overflow-x: auto;
-  /* 纵向：滚动主权交给 xterm 自身 viewport，保持单一纵向滚动条（B+ 目标）。 */
-  overflow-y: hidden;
+  /* 纵向（Opt-1a'）：host 承载"当前屏溢出"的外层滚动 → 唯一可见纵向条。
+     历史 scrollback 隐藏 xterm 原生条、改由 Surface 的 capture-phase wheel 仲裁进入。 */
+  overflow-y: auto;
   padding: 8px;
   box-sizing: border-box;
   background: #0b1020;
@@ -73,15 +74,22 @@
   display: inline-block;
   min-width: 100%;
   width: auto;
-  /* 填满 host 高度，使纵向 scrollback 由 xterm viewport 承载，而非 host。 */
-  height: 100%;
+  /* 按内容高度撑开（rows×cellHeight 高于 host 时 → 触发 host 外层纵向滚动看全到底）；
+     pane 矮于 host 时由 min-height 兜满。 */
+  height: auto;
+  min-height: 100%;
 }
 
 .terminalHost :global(.xterm-viewport) {
   background-color: transparent !important;
-  /* xterm 默认 overflow-y:scroll 永久占位：当 host 高于 frame.rows 实际行数时，
-     会在底部空白区残留一根无内容可滚的死滚动条。改 auto → 仅有可滚历史时才出现。 */
-  overflow-y: auto !important;
+  overflow-y: hidden !important;
+}
+
+/* Opt-1a'：隐藏 xterm6 内置纵向滚动条（.xterm-scrollable-element > .scrollbar.vertical）。
+   它绝对定位在 .xterm 内、host 外滚时会移出视口、不可靠；纵向只保留 host 这一根可见条，
+   历史改由 Surface 的 wheel 仲裁进入。横向 .scrollbar.horizontal 不动。 */
+.terminalHost :global(.xterm-scrollable-element) > :global(.scrollbar.vertical) {
+  display: none !important;
 }
 
 .menu {

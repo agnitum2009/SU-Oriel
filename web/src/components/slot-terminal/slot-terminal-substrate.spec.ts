@@ -80,6 +80,12 @@ class FakeTerminal implements SlotTerminalWritableTerminal {
   }
 }
 
+class FakeScrollHost {
+  scrollTop = 0;
+  clientHeight = 100;
+  scrollHeight = 100;
+}
+
 const readyDescriptor: SlotTerminalReadyDescriptor = {
   projectId: "project-1",
   requirementId: "req-1",
@@ -239,6 +245,38 @@ describe("slot-terminal mock websocket substrate", () => {
 
     expect(terminal.writes).toEqual([`${SLOT_TERMINAL_FULL_FRAME_CLEAR}live`]);
     expect(terminal.scrollToBottomCalls).toBe(1);
+  });
+
+  it("follows both xterm and host to the bottom when both are already at the bottom (Opt-1a' host wiring)", async () => {
+    const terminal = new FakeTerminal();
+    terminal.buffer = { active: { baseY: 12, viewportY: 12 } };
+    const host = new FakeScrollHost();
+    host.scrollTop = 900;
+    host.clientHeight = 100;
+    host.scrollHeight = 1000;
+    const renderer = new SlotTerminalFrameRenderer(terminal, host as unknown as HTMLElement);
+
+    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 40, generation: 2, initial: false });
+    await nextRenderFrame();
+
+    expect(terminal.scrollToBottomCalls).toBe(1);
+    expect(host.scrollTop).toBe(host.scrollHeight);
+  });
+
+  it("does not follow when the host is scrolled up even though xterm is at the bottom", async () => {
+    const terminal = new FakeTerminal();
+    terminal.buffer = { active: { baseY: 12, viewportY: 12 } };
+    const host = new FakeScrollHost();
+    host.scrollTop = 200;
+    host.clientHeight = 100;
+    host.scrollHeight = 1000;
+    const renderer = new SlotTerminalFrameRenderer(terminal, host as unknown as HTMLElement);
+
+    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 40, generation: 2, initial: false });
+    await nextRenderFrame();
+
+    expect(terminal.scrollToBottomCalls).toBe(0);
+    expect(host.scrollTop).toBe(200);
   });
 
   it("sends visibility and active hints for hidden pause and never sends resize", () => {
