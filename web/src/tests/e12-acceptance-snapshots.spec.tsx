@@ -40,6 +40,7 @@ vi.mock("../lib/console-api.js", () => ({
   fetchDocumentDetail: vi.fn(),
   fetchTasks: vi.fn(),
   fetchTaskDetail: vi.fn(),
+  fetchTaskMarkdown: vi.fn(),
   fetchTaskTimeline: vi.fn(),
   fetchEventJournalEvents: vi.fn().mockResolvedValue({ items: [], pageInfo: { limit: 20, offset: 0, count: 0 } }),
   updateTask: vi.fn(),

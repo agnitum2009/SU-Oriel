@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, test, vi } from "vitest";
 
@@ -7,6 +10,7 @@ import { buildApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
 
 const createdProjectIds: string[] = [];
+const createdTempPaths: string[] = [];
 
 async function createTaskFixture(options: { status?: string } = {}) {
   const suffix = randomUUID();
@@ -49,6 +53,7 @@ afterEach(async () => {
       }
     });
   }
+  await Promise.all(createdTempPaths.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 async function createRequirementWithEpicFixture() {
@@ -81,6 +86,59 @@ async function createRequirementWithEpicFixture() {
   });
 
   return { projectId: project.id, requirementId: requirement.id };
+}
+
+async function createTaskMarkdownRouteFixture(options: { writeDocument?: boolean } = {}) {
+  const suffix = randomUUID();
+  const projectRoot = join(tmpdir(), `ccb-task-markdown-route-${suffix}`);
+  createdTempPaths.push(projectRoot);
+  await mkdir(join(projectRoot, "docs", "03_开发计划"), { recursive: true });
+  const project = await prisma.project.create({
+    data: {
+      name: `task-markdown-route-${suffix}`,
+      localPath: projectRoot
+    }
+  });
+  createdProjectIds.push(project.id);
+  const task = await prisma.task.create({
+    data: {
+      projectId: project.id,
+      taskKey: `task-${suffix}`,
+      title: "Markdown route task",
+      status: "reviewing"
+    }
+  });
+
+  if (options.writeDocument ?? true) {
+    const documentPath = "docs/03_开发计划/route-开发任务.md";
+    await writeFile(join(projectRoot, documentPath), "---\ndoc_type: dev_task\n---\n# Route body", "utf8");
+    const document = await prisma.document.create({
+      data: {
+        projectId: project.id,
+        taskKey: task.taskKey,
+        path: documentPath,
+        kind: "dev_task",
+        title: "Route dev task",
+        status: "reviewing",
+        frontmatterJson: JSON.stringify({ doc_type: "dev_task", task_id: task.taskKey }),
+        contentHash: randomUUID(),
+        mtime: new Date()
+      }
+    });
+    await prisma.task.update({
+      where: {
+        id: task.id
+      },
+      data: {
+        primaryDocumentId: document.id
+      }
+    });
+  }
+
+  return {
+    project,
+    task
+  };
 }
 
 test("PATCH /api/tasks/:taskId rejects deprecated phase writes with currentNode guidance", async () => {
@@ -153,6 +211,50 @@ test("PATCH /api/tasks/:taskId still updates console-internal priority", async (
     assert.equal(response.json().priority, "high");
     assert.equal(response.json().progress, 20);
     assert.equal(response.json().phase, "实施");
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/projects/:projectId/tasks/:taskId/markdown returns body-only task markdown", async () => {
+  const app = buildApp();
+  const { project, task } = await createTaskMarkdownRouteFixture();
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/tasks/${task.id}/markdown`
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      path: "docs/03_开发计划/route-开发任务.md",
+      content: "# Route body"
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/projects/:projectId/tasks/:taskId/markdown returns 404 across project or without readable document", async () => {
+  const app = buildApp();
+  const readable = await createTaskMarkdownRouteFixture();
+  const missing = await createTaskMarkdownRouteFixture({ writeDocument: false });
+
+  try {
+    const crossProjectResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${missing.project.id}/tasks/${readable.task.id}/markdown`
+    });
+    assert.equal(crossProjectResponse.statusCode, 404);
+    assert.equal(crossProjectResponse.json().message, "任务文档不存在或尚未进入索引");
+
+    const missingDocumentResponse = await app.inject({
+      method: "GET",
+      url: `/api/projects/${missing.project.id}/tasks/${missing.task.id}/markdown`
+    });
+    assert.equal(missingDocumentResponse.statusCode, 404);
+    assert.equal(missingDocumentResponse.json().message, "任务文档不存在或尚未进入索引");
   } finally {
     await app.close();
   }

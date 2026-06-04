@@ -21,6 +21,7 @@ import {
 } from "./task.schemas.js";
 import { serializeWorkspace } from "../workspace/workspace.routes.js";
 import { JobSlotRouter } from "../slot-binding/job-slot-router.js";
+import { loadTaskMarkdownBody, TaskMarkdownNotFoundError } from "./task-markdown.service.js";
 
 interface TaskNodeFields {
   currentNode?: string | null;
@@ -495,6 +496,22 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
     return {
       items: tasks.map((task) => serializeTaskListItem(task, semanticKindByTaskKey.get(task.taskKey) ?? null))
     };
+  });
+
+  app.get("/api/projects/:projectId/tasks/:taskId/markdown", async (request, reply) => {
+    const { projectId, taskId } = request.params as { projectId: string; taskId: string };
+
+    try {
+      return await loadTaskMarkdownBody(prisma, projectId, taskId);
+    } catch (error) {
+      if (error instanceof TaskMarkdownNotFoundError) {
+        reply.status(404);
+        return {
+          message: "任务文档不存在或尚未进入索引"
+        };
+      }
+      throw error;
+    }
   });
 
   app.get("/api/tasks/:taskId", async (request, reply) => {

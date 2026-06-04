@@ -22,6 +22,7 @@ import {
   fetchRequirementMarkdown,
   fetchSlots,
   fetchSubtaskBatchCandidates,
+  fetchTaskMarkdown,
   fetchTasks,
   patchRequirement,
   reindexRequirement,
@@ -44,10 +45,10 @@ const TERMINAL_STATUSES = new Set(["delivered", "cancelled"]);
 
 type ArtifactModal = "ai" | "design" | null;
 type DocumentModalMode = "read" | "edit" | null;
-type RequirementMarkdownStatus = "idle" | "loading" | "ready" | "empty" | "not-found" | "error";
+type MarkdownReaderStatus = "idle" | "loading" | "ready" | "empty" | "not-found" | "error";
 
-interface RequirementMarkdownState {
-  status: RequirementMarkdownStatus;
+interface MarkdownReaderState {
+  status: MarkdownReaderStatus;
   content?: string;
   message?: string;
 }
@@ -201,7 +202,7 @@ function renderDesignDocumentContent(state: DesignDocumentState): ReactNode {
   }
 }
 
-function renderRequirementMarkdownContent(state: RequirementMarkdownState, projectId: string | null): ReactNode {
+function renderRequirementMarkdownContent(state: MarkdownReaderState, projectId: string | null): ReactNode {
   switch (state.status) {
     case "loading":
       return <DesignDocumentFallback title="正在加载需求文档..." />;
@@ -217,6 +218,27 @@ function renderRequirementMarkdownContent(state: RequirementMarkdownState, proje
       return <DesignDocumentFallback title="需求文档不存在或已被删除" />;
     case "error":
       return <DesignDocumentFallback title={state.message ?? "读取需求文档失败"} />;
+    case "idle":
+      return null;
+  }
+}
+
+function renderTaskMarkdownContent(state: MarkdownReaderState): ReactNode {
+  switch (state.status) {
+    case "loading":
+      return <DesignDocumentFallback title="正在加载任务文档..." />;
+    case "ready":
+      return (
+        <div className={styles.markdownSurface}>
+          <MarkdownViewer content={state.content ?? ""} />
+        </div>
+      );
+    case "empty":
+      return <DesignDocumentFallback title="任务文档正文为空" />;
+    case "not-found":
+      return <DesignDocumentFallback title="任务文档不存在或尚未进入索引" />;
+    case "error":
+      return <DesignDocumentFallback title={state.message ?? "读取任务文档失败"} />;
     case "idle":
       return null;
   }
@@ -316,6 +338,7 @@ export function RequirementDetailPage() {
   const [documentModal, setDocumentModal] = useState<DocumentModalMode>(null);
   const [artifactModal, setArtifactModal] = useState<ArtifactModal>(null);
   const [subtasksExpanded, setSubtasksExpanded] = useState(false);
+  const [subtaskReader, setSubtaskReader] = useState<TaskView | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -330,7 +353,8 @@ export function RequirementDetailPage() {
   const [requirementSlot, setRequirementSlot] = useState<SlotLaneView | null>(null);
   const [slotReleaseDraft, setSlotReleaseDraft] = useState<SlotReleaseDraft | null>(null);
   const [designDocumentState, setDesignDocumentState] = useState<DesignDocumentState>({ status: "idle" });
-  const [aiMarkdownState, setAiMarkdownState] = useState<RequirementMarkdownState>({ status: "idle" });
+  const [aiMarkdownState, setAiMarkdownState] = useState<MarkdownReaderState>({ status: "idle" });
+  const [subtaskMarkdownState, setSubtaskMarkdownState] = useState<MarkdownReaderState>({ status: "idle" });
   const [slotLoading, setSlotLoading] = useState(false);
   const [slotAction, setSlotAction] = useState<"bind" | "release" | null>(null);
   const isFetchingRef = useRef(false);
@@ -339,6 +363,7 @@ export function RequirementDetailPage() {
   const designDocumentRequestRef = useRef<DesignDocumentRequest | null>(null);
   const designDocumentRequestSeqRef = useRef(0);
   const aiMarkdownRequestSeqRef = useRef(0);
+  const subtaskMarkdownRequestSeqRef = useRef(0);
 
   useEffect(() => {
     pendingDispatchesRef.current = pendingDispatches;
@@ -596,6 +621,43 @@ export function RequirementDetailPage() {
         });
       });
   }, [artifactModal, selectedProjectId, requirementId, requirement?.mdHash]);
+
+  useEffect(() => {
+    if (!subtaskReader) {
+      subtaskMarkdownRequestSeqRef.current += 1;
+      setSubtaskMarkdownState({ status: "idle" });
+      return;
+    }
+    if (!selectedProjectId) {
+      setSubtaskMarkdownState({ status: "error", message: "请先选择项目" });
+      return;
+    }
+
+    const requestId = subtaskMarkdownRequestSeqRef.current + 1;
+    subtaskMarkdownRequestSeqRef.current = requestId;
+    setSubtaskMarkdownState({ status: "loading" });
+    void fetchTaskMarkdown(selectedProjectId, subtaskReader.id)
+      .then((result) => {
+        if (subtaskMarkdownRequestSeqRef.current !== requestId) return;
+        const body = (result.content ?? "").trim();
+        if (body.length === 0) {
+          setSubtaskMarkdownState({ status: "empty" });
+          return;
+        }
+        setSubtaskMarkdownState({ status: "ready", content: result.content });
+      })
+      .catch((error) => {
+        if (subtaskMarkdownRequestSeqRef.current !== requestId) return;
+        if (error instanceof ConsoleApiError && error.status === 404) {
+          setSubtaskMarkdownState({ status: "not-found" });
+          return;
+        }
+        setSubtaskMarkdownState({
+          status: "error",
+          message: `读取任务文档失败：${error instanceof Error ? error.message : "未知错误"}`
+        });
+      });
+  }, [selectedProjectId, subtaskReader]);
 
   useEffect(() => {
     void reindexAndRefresh();
@@ -1053,7 +1115,7 @@ export function RequirementDetailPage() {
                       const badge = subtaskDispatchBadge(task, candidateByTaskId.get(task.id), pendingSubtaskDispatchIds.has(task.id));
                       return (
                         <li className={styles.subtaskItem} key={task.id}>
-                          <button className={styles.subtaskButton} onClick={() => navigate(`/tasks/${task.id}`)} type="button">
+                          <button className={styles.subtaskButton} onClick={() => setSubtaskReader(task)} type="button">
                             <span className={styles.subtaskStep}>{index + 1}</span>
                             <span className={styles.subtaskTitle}>{task.title}</span>
                             <span className={styles.subtaskMeta}>{task.currentNode ?? "待派工"} · {task.progress}%</span>
@@ -1276,6 +1338,15 @@ export function RequirementDetailPage() {
             你将{confirmLifecycleText.verb}需求「{requirement.title}」，此动作通过 slot dispatch 派发到 Claude，是否继续？
           </p>
         ) : null}
+      </Modal>
+
+      <Modal
+        onClose={() => setSubtaskReader(null)}
+        open={subtaskReader !== null}
+        size="reader"
+        title={subtaskReader ? `任务文档 · ${subtaskReader.title}` : "任务文档"}
+      >
+        {renderTaskMarkdownContent(subtaskMarkdownState)}
       </Modal>
 
       <Modal
