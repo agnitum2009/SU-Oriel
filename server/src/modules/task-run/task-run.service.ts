@@ -11,7 +11,6 @@ import {
   assertTaskRunTransition,
   type TaskRunState
 } from "./task-run.state-machine.js";
-import { isWorktreeDirty } from "./dirty-check.js";
 
 export class TaskRunConflictError extends Error {
   public constructor(message: string) {
@@ -167,29 +166,6 @@ function mapKernelResult(applied: Awaited<ReturnType<typeof kernelApply>>): Task
     primitive: applied.primitive,
     task_run: applied.result as SerializedTaskRun
   };
-}
-
-async function assertCleanDispatchWorktree(taskId: string): Promise<void> {
-  const task = await prisma.task.findUnique({
-    where: {
-      id: taskId
-    },
-    select: {
-      project: {
-        select: {
-          localPath: true
-        }
-      }
-    }
-  });
-
-  if (!task) {
-    throw new KernelApplyNotFoundError("任务不存在");
-  }
-
-  if (await isWorktreeDirty(task.project.localPath)) {
-    throw new TaskRunConflictError("worktree is dirty, use force=true to override");
-  }
 }
 
 export async function dispatchTaskRun(
