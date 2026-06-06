@@ -15,6 +15,7 @@ import {
   type StartupProjectScanLifecycle
 } from "./indexer/startup-project-scan.js";
 import { registerActivityRoutes } from "./modules/activity/activity.routes.js";
+import { registerAttentionInboxRoutes } from "./modules/attention-inbox/attention-inbox.routes.js";
 import { registerAiCliRoutes } from "./modules/ai-cli/ai-cli.routes.js";
 import { registerAiCliWs } from "./modules/ai-cli/ai-cli.ws.js";
 import { registerAiToolsRoutes } from "./modules/ai-tools/ai-tools.routes.js";
@@ -164,6 +165,7 @@ export function buildApp(dependencies: AppDependencies = {}): FastifyInstance {
   void app.register(registerTaskEventViewRoutes);
   void app.register(registerUserIntentRoutes, dependencies.userIntent ?? {});
   void app.register(registerPendingInteractionsRoutes);
+  void app.register(registerAttentionInboxRoutes);
   void app.register(registerActivityRoutes);
   void app.register(registerTaskRunRoutes);
   void app.register(registerRequirementRoutes, dependencies.requirementReanalyze ?? {});

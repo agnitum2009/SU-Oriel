@@ -5,6 +5,7 @@ import type {
   TaskEventView,
   TaskTimelineResult
 } from "./task-event-view.types.js";
+import { getTaskEventSeverity } from "../attention-inbox/attention-severity.js";
 
 const TITLE_BY_KIND: Record<TaskEventKind, string> = {
   codex_picked_up: "Codex 接受派工",
@@ -30,30 +31,6 @@ const TITLE_BY_KIND: Record<TaskEventKind, string> = {
   anchor_recovering: "Anchor 正在恢复"
 };
 
-const SEVERITY_BY_KIND: Record<TaskEventKind, TaskEventView["severity"]> = {
-  codex_picked_up: "info",
-  codex_receipt_ready: "info",
-  codex_rejected: "warning",
-  user_arbitration_submitted: "info",
-  user_arbitration_required: "attention",
-  session_resumed: "info",
-  verification_finished: "info",
-  batch_cancelled: "warning",
-  state_write_conflict: "warning",
-  tool_call_denied: "warning",
-  requirement_materialized: "info",
-  subtask_planning_inherited: "info",
-  review_intent_created: "attention",
-  review_intent_consumed: "info",
-  review_intent_cancelled: "warning",
-  transition_proposed: "info",
-  transition_applied: "info",
-  transition_ineligible: "warning",
-  anchor_mounted: "info",
-  anchor_destroyed: "info",
-  anchor_recovering: "warning"
-};
-
 function safeParseJson(value: string | null): Record<string, unknown> {
   if (!value) return {};
   try {
@@ -73,7 +50,7 @@ function mapEventJournalRow(row: EventJournal): TaskEventView | null {
     source: "event_journal",
     at: row.emittedAt.toISOString(),
     title: TITLE_BY_KIND[kind],
-    severity: SEVERITY_BY_KIND[kind],
+    severity: getTaskEventSeverity(kind),
     anchorId: row.anchorId ?? null,
     payload: {
       ...safeParseJson(row.payloadJson),

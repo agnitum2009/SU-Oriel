@@ -46,6 +46,8 @@ model Project {
   eventJournals    EventJournal[]
   slotBindings     SlotBinding[]
   projectSettings  ProjectSettings?
+  attentionAcks     AttentionAck[]
+  attentionSettings ProjectAttentionSettings?
   executorProfiles ExecutorProfile[]
   sprints          Sprint[]
 }
@@ -63,6 +65,37 @@ model ProjectSettings {
   pathConfigJson   String   @map("path_config")
   /// @owner(console-internal, operator)
   updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model AttentionAck {
+  /// @owner(console-internal, operator)
+  id        String   @id @default(cuid())
+  /// @owner(console-internal, operator)
+  projectId String
+  /// @owner(console-internal, operator)
+  ref       String
+  /// @owner(console-internal, operator)
+  ackedAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, ref])
+  @@index([projectId, ackedAt])
+}
+
+model ProjectAttentionSettings {
+  /// @owner(console-internal, operator)
+  id        String   @id @default(cuid())
+  /// @owner(console-internal, operator)
+  projectId String   @unique
+  /// @owner(console-internal, operator)
+  dndUntil  DateTime?
+  /// @owner(console-internal, operator)
+  createdAt DateTime @default(now())
+  /// @owner(console-internal, operator)
+  updatedAt DateTime @updatedAt
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }

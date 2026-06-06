@@ -638,6 +638,46 @@ entities:
         owner: console-internal
         source: operator
         sync: none
+  - entity: AttentionAck
+    fields:
+      - field: id
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: projectId
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: ref
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: ackedAt
+        owner: console-internal
+        source: operator
+        sync: none
+  - entity: ProjectAttentionSettings
+    fields:
+      - field: id
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: projectId
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: dndUntil
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: createdAt
+        owner: console-internal
+        source: operator
+        sync: none
+      - field: updatedAt
+        owner: console-internal
+        source: operator
+        sync: none
   - entity: Requirement
     fields:
       - field: id
