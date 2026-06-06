@@ -284,6 +284,37 @@ test("computeAttention includes provider activity source and ack suppresses it",
   assert.equal(afterAck.items.some((item) => item.ref === providerItem.ref), false);
 });
 
+test("computeAttention projects unhealthy slots without requirement binding using slot fallback CTA", async () => {
+  const fx = await fixture();
+  await prisma.slotBinding.create({
+    data: {
+      projectId: fx.projectId,
+      slotId: "slot-9",
+      requirementId: null,
+      state: "unhealthy",
+      boundAt: new Date("2026-06-06T10:00:00.000Z"),
+      lastActivityAt: new Date("2026-06-06T11:08:00.000Z")
+    }
+  });
+
+  const service = new AttentionInboxService(prisma);
+  const result = await service.computeAttention(fx.projectId, { now: NOW });
+  const item = result.items.find((entry) => entry.ref === "slot_binding:slot-9/unhealthy");
+
+  assert.ok(item);
+  assert.equal(item.kind, "slot_unhealthy");
+  assert.equal(item.severity, "warning");
+  assert.equal(item.requirementId, null);
+  assert.equal(item.summary, "slot-9: unhealthy");
+  assert.deepEqual(item.cta, {
+    type: "slot",
+    label: "定位 slot",
+    projectId: fx.projectId,
+    requirementId: null,
+    slotId: "slot-9"
+  });
+});
+
 test("task-event-view keeps existing severity mapping after helper extraction", async () => {
   const fx = await fixture();
   await prisma.eventJournal.create({
