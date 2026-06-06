@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,6 +8,8 @@ import { afterEach, test } from "vitest";
 
 import { buildApp } from "../../app.js";
 import { prisma } from "../../db/prisma.js";
+
+const tmpRoots: string[] = [];
 
 function envelope(projectRoot: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -29,7 +32,8 @@ function envelope(projectRoot: string, overrides: Record<string, unknown> = {}) 
 }
 
 async function createProjectFixture() {
-  const localPath = join(tmpdir(), `ccb-plugin-hook-route-${randomUUID()}`);
+  const localPath = await mkdtemp(join(tmpdir(), "ccb-plugin-hook-route-"));
+  tmpRoots.push(localPath);
   const project = await prisma.project.create({
     data: {
       name: `plugin-hook-route-${randomUUID()}`,
@@ -49,6 +53,33 @@ async function waitForCondition(assertion: () => boolean, timeoutMs = 1000): Pro
   assert.fail("等待条件超时");
 }
 
+function pluginJournalEvent(overrides: Record<string, unknown> = {}) {
+  return {
+    type: "codex_receipt_ready",
+    subject_type: "subtask",
+    subject_id: "task-watermark",
+    payload: { receipt_summary: "done" },
+    idempotency_key: `watermark-${randomUUID()}`,
+    emitted_at: "2026-05-22T10:00:00.000Z",
+    source_actor: "ccb_codex",
+    ...overrides
+  };
+}
+
+async function writePluginJournal(projectRoot: string, lines: string[]): Promise<void> {
+  const journalDir = join(projectRoot, "docs", ".ccb", "events");
+  await mkdir(journalDir, { recursive: true });
+  await writeFile(join(journalDir, "journal.jsonl"), `${lines.join("\n")}\n`, "utf8");
+}
+
+function pluginJournalEventId(event: { idempotency_key?: unknown }, rawLine: string): string {
+  const idempotencyKey = typeof event.idempotency_key === "string" ? event.idempotency_key.trim() : "";
+  const hash = createHash("sha256")
+    .update(idempotencyKey ? `idempotency:${idempotencyKey}` : rawLine)
+    .digest("hex");
+  return `plugin:${hash}`;
+}
+
 afterEach(async () => {
   await prisma.project.deleteMany({
     where: {
@@ -57,6 +88,152 @@ afterEach(async () => {
       }
     }
   });
+  await Promise.all(tmpRoots.map((root) => rm(root, { recursive: true, force: true })));
+  tmpRoots.length = 0;
+});
+
+test("POST /api/plugin-hooks/event-journal queues scan when journal watermark is ahead of DB and stops after ingestion catches up", async () => {
+  const { project, localPath } = await createProjectFixture();
+  const journalEvent = pluginJournalEvent({ idempotency_key: "watermark-catch-up" });
+  const rawLine = JSON.stringify(journalEvent);
+  await writePluginJournal(localPath, [rawLine]);
+  const scans: string[] = [];
+  const app = buildApp({
+    enableFileWatcher: false,
+    pluginHooks: {
+      debounceMs: 20,
+      journalReconcileCooldownMs: 60_000,
+      scanProject: async (_prisma, projectId) => {
+        scans.push(projectId);
+      }
+    }
+  });
+
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, { event: journalEvent })
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    assert.equal(first.json().scanQueued, true);
+    await waitForCondition(() => scans.length === 1);
+
+    await prisma.eventJournal.create({
+      data: {
+        eventId: pluginJournalEventId(journalEvent, rawLine),
+        eventType: journalEvent.type,
+        projectId: project.id,
+        subjectType: journalEvent.subject_type,
+        subjectId: journalEvent.subject_id,
+        payloadJson: JSON.stringify(journalEvent.payload),
+        emittedAt: new Date(journalEvent.emitted_at),
+        sourceActor: journalEvent.source_actor,
+        sourceComponent: "ccb-claude-plugin",
+        idempotencyKey: journalEvent.idempotency_key
+      }
+    });
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, {
+        event_hash: "b".repeat(64),
+        event: { ...journalEvent, idempotency_key: "watermark-catch-up-hook-2" }
+      })
+    });
+
+    assert.equal(second.statusCode, 202, second.body);
+    assert.equal(second.json().scanQueued, false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(scans, [project.id]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/plugin-hooks/event-journal applies journal watermark cooldown to avoid repeated scans", async () => {
+  const { project, localPath } = await createProjectFixture();
+  const journalEvent = pluginJournalEvent({ idempotency_key: "watermark-cooldown" });
+  await writePluginJournal(localPath, [JSON.stringify(journalEvent)]);
+  const scans: string[] = [];
+  const app = buildApp({
+    enableFileWatcher: false,
+    pluginHooks: {
+      debounceMs: 20,
+      journalReconcileCooldownMs: 60_000,
+      scanProject: async (_prisma, projectId) => {
+        scans.push(projectId);
+      }
+    }
+  });
+
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, { event: journalEvent })
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, {
+        event_hash: "c".repeat(64),
+        event: { ...journalEvent, idempotency_key: "watermark-cooldown-hook-2" }
+      })
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    assert.equal(second.statusCode, 202, second.body);
+    assert.equal(first.json().scanQueued, true);
+    assert.equal(second.json().scanQueued, false);
+    await waitForCondition(() => scans.length === 1);
+    assert.deepEqual(scans, [project.id]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("POST /api/plugin-hooks/event-journal skips reconcile scans for consecutive bad journal lines", async () => {
+  const { localPath } = await createProjectFixture();
+  await writePluginJournal(localPath, ["{bad", "{still_bad"]);
+  const scans: string[] = [];
+  const app = buildApp({
+    enableFileWatcher: false,
+    pluginHooks: {
+      debounceMs: 20,
+      journalReconcileCooldownMs: 0,
+      scanProject: async (_prisma, projectId) => {
+        scans.push(projectId);
+      }
+    }
+  });
+
+  try {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, { event: pluginJournalEvent({ idempotency_key: "bad-hook-1" }) })
+    });
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/plugin-hooks/event-journal",
+      payload: envelope(localPath, {
+        event_hash: "d".repeat(64),
+        event: pluginJournalEvent({ idempotency_key: "bad-hook-2" })
+      })
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    assert.equal(second.statusCode, 202, second.body);
+    assert.equal(first.json().scanQueued, false);
+    assert.equal(second.json().scanQueued, false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(scans, []);
+  } finally {
+    await app.close();
+  }
 });
 
 test("POST /api/plugin-hooks/event-journal queues fallback scan for unknown artifact events", async () => {

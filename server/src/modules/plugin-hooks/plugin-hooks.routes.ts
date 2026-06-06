@@ -5,7 +5,10 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { prisma } from "../../db/prisma.js";
-import { startProjectScan as defaultScanProject } from "../../indexer/project-indexer.js";
+import {
+  checkPluginJournalWatermark,
+  startProjectScan as defaultScanProject
+} from "../../indexer/project-indexer.js";
 import {
   reindexBreakdownDraftForRequirement as defaultReindexBreakdownDraftForRequirement,
   reindexRequirementDesignDocFromMarkdown as defaultReindexRequirementDesignDocFromMarkdown,
@@ -15,6 +18,7 @@ import { updateSlotActivityForCapabilityOutcome } from "../slot-binding/slot-bin
 
 const LOCAL_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 const DEFAULT_DEBOUNCE_MS = 200;
+const DEFAULT_JOURNAL_RECONCILE_COOLDOWN_MS = 30_000;
 
 type ScanProjectFn = (prismaClient: PrismaClient, projectId: string) => Promise<unknown>;
 type ReindexRequirementFromMarkdownFn = (
@@ -42,6 +46,7 @@ export interface PluginHookRouteDependencies {
   reindexRequirementDesignDocFromMarkdown?: ReindexRequirementDesignDocFromMarkdownFn;
   reindexBreakdownDraftForRequirement?: ReindexBreakdownDraftForRequirementFn;
   debounceMs?: number;
+  journalReconcileCooldownMs?: number;
 }
 
 const pluginEventSchema = z
@@ -84,7 +89,10 @@ export async function registerPluginHookRoutes(
   const reindexBreakdownDraftForRequirement =
     dependencies.reindexBreakdownDraftForRequirement ?? defaultReindexBreakdownDraftForRequirement;
   const debounceMs = dependencies.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+  const journalReconcileCooldownMs =
+    dependencies.journalReconcileCooldownMs ?? DEFAULT_JOURNAL_RECONCILE_COOLDOWN_MS;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const journalReconcileCooldowns = new Map<string, number>();
 
   app.addHook("onClose", async () => {
     for (const timer of timers.values()) {
@@ -143,7 +151,9 @@ export async function registerPluginHookRoutes(
       });
     }
 
-    const scanQueued = await dispatchArtifactReindex(parsed.data.event, project.id);
+    const artifactScanQueued = await dispatchArtifactReindex(parsed.data.event, project.id);
+    const journalScanQueued = await shouldQueueJournalWatermarkScan(project.id, projectRoot);
+    const scanQueued = artifactScanQueued || journalScanQueued;
     if (scanQueued) {
       queueProjectScan(project.id);
     }
@@ -187,6 +197,44 @@ export async function registerPluginHookRoutes(
     }
   }
 
+  async function shouldQueueJournalWatermarkScan(projectId: string, projectRoot: string): Promise<boolean> {
+    let result;
+    try {
+      result = await checkPluginJournalWatermark(db, projectId, projectRoot);
+    } catch (error) {
+      app.log.warn(
+        { err: error, projectId, event: "plugin_journal.watermark_check_failed" },
+        "plugin journal watermark check failed; skipped project scan reconcile"
+      );
+      return false;
+    }
+
+    if (result.status === "current") {
+      journalReconcileCooldowns.delete(journalWatermarkCooldownKey(projectId, result.journalPath, result.eventId));
+      return false;
+    }
+    if (result.status === "lagging") {
+      const key = journalWatermarkCooldownKey(projectId, result.journalPath, result.eventId);
+      const now = Date.now();
+      const lastQueuedAt = journalReconcileCooldowns.get(key);
+      if (lastQueuedAt && now - lastQueuedAt < journalReconcileCooldownMs) {
+        return false;
+      }
+      journalReconcileCooldowns.set(key, now);
+      app.log.warn(
+        { projectId, journalPath: result.journalPath, eventId: result.eventId, line: result.line },
+        "plugin journal DB watermark lagging; queued project scan reconcile"
+      );
+      return true;
+    }
+
+    app.log.warn(
+      { projectId, journalPath: result.journalPath, status: result.status, issue: "issue" in result ? result.issue : null },
+      "plugin journal watermark unavailable; skipped project scan reconcile"
+    );
+    return false;
+  }
+
   function queueProjectScan(projectId: string): void {
     const existing = timers.get(projectId);
     if (existing) {
@@ -201,6 +249,10 @@ export async function registerPluginHookRoutes(
     timer.unref?.();
     timers.set(projectId, timer);
   }
+}
+
+function journalWatermarkCooldownKey(projectId: string, journalPath: string, eventId: string): string {
+  return `${projectId}:${journalPath}:${eventId}`;
 }
 
 function isLocalRequest(request: FastifyRequest): boolean {
