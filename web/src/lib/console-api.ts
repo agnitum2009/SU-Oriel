@@ -33,7 +33,6 @@ import type {
   TaskDetailView,
   TaskTimelineView,
   TaskView,
-  TaskWorkspaceView,
   UpdateTaskInput
 } from "../types/task.js";
 
@@ -1022,12 +1021,6 @@ export async function uploadRequirementAsset(
   );
 }
 
-export async function createTaskWorkspace(taskId: string): Promise<TaskWorkspaceView> {
-  return await requestJson<TaskWorkspaceView>(`/api/tasks/${taskId}/workspaces`, "创建任务工作空间失败", {
-    method: "POST"
-  });
-}
-
 export type DeriveFollowupType = "subtask" | "requirement";
 
 export interface DeriveFollowupInput {
@@ -1072,12 +1065,6 @@ export async function deriveFollowup(
       })
     }
   );
-}
-
-export async function cleanupTaskWorkspace(workspaceId: string): Promise<TaskWorkspaceView> {
-  return await requestJson<TaskWorkspaceView>(`/api/task-workspaces/${workspaceId}`, "清理任务工作空间失败", {
-    method: "DELETE"
-  });
 }
 
 export async function createReviewIntent(

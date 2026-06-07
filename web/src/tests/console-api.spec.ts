@@ -4,11 +4,9 @@ import {
   buildApiUrl,
   ackAttention,
   cancelReviewIntent,
-  cleanupTaskWorkspace,
   consumeReviewIntent,
   createReviewIntent,
   createRequirement,
-  createTaskWorkspace,
   dispatchRequirementAnchorCommand,
   dispatchTaskAnchorCommand,
   fetchAttention,
@@ -258,28 +256,6 @@ describe("console-api 真实联调行为", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/projects/project-1/requirements/tmp-1/assets", {
       method: "POST",
       body: expect.any(FormData)
-    });
-  });
-
-  it("任务 workspace 创建和清理使用独立端点", async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(new Response(JSON.stringify({ id: "workspace-1", status: "ready" }), {
-        status: 201,
-        headers: {
-          "Content-Type": "application/json"
-        }
-      }))
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await createTaskWorkspace("task-1");
-    await cleanupTaskWorkspace("workspace-1");
-
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/tasks/task-1/workspaces", {
-      method: "POST"
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/task-workspaces/workspace-1", {
-      method: "DELETE"
     });
   });
 

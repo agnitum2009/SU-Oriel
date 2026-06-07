@@ -50,8 +50,6 @@ vi.mock("../lib/console-api.js", () => ({
   fetchSyncJobs: vi.fn(),
   createRequirement: vi.fn(),
   uploadRequirementAsset: vi.fn(),
-  createTaskWorkspace: vi.fn(),
-  cleanupTaskWorkspace: vi.fn(),
   dispatchTaskAnchorCommand: vi.fn(),
   createReviewIntent: vi.fn(),
   cancelReviewIntent: vi.fn(),
@@ -73,7 +71,6 @@ class MockEventSource extends EventTarget {
 }
 
 const TEST_PROJECT_ROOT = "/tmp/ccb-test";
-const TEST_WORKSPACE_PATH = `${TEST_PROJECT_ROOT}/.workspaces/task-user-login`;
 
 const project: ProjectView = {
   id: "project-1",
@@ -197,26 +194,6 @@ const taskDetail: TaskDetailView = {
       title: "用户登录能力",
       status: "reviewing"
     }
-  ],
-  workspaces: [
-    {
-      id: "workspace-1",
-      projectId: "project-1",
-      taskId: "task-1",
-      taskKey: "task-user-login",
-      baseRef: "HEAD",
-      branchName: "task/task-user-login",
-      workspacePath: TEST_WORKSPACE_PATH,
-      status: "ready",
-      lockMode: "exclusive",
-      cleanupPolicy: "manual",
-      lockedByRunId: null,
-      cleanupAfter: null,
-      lastVerifiedAt: null,
-      errorMessage: null,
-      createdAt: "2026-04-16T10:00:00.000Z",
-      updatedAt: "2026-04-16T10:00:00.000Z"
-    }
   ]
 };
 
@@ -240,14 +217,6 @@ const taskTimeline = {
       label: "Review intent created: request_replan",
       details: {
         status: "pending"
-      }
-    },
-    {
-      kind: "workspace_create",
-      at: "2026-04-16T10:00:00.000Z",
-      label: "Workspace created",
-      details: {
-        branchName: "task/task-user-login"
       }
     },
     {
@@ -374,11 +343,6 @@ function mockConsoleApi(): void {
   });
   vi.mocked(consoleApi.fetchSyncJobs).mockResolvedValue(syncJobList);
   vi.mocked(consoleApi.createRequirement).mockResolvedValue(requirementList[0]);
-  vi.mocked(consoleApi.createTaskWorkspace).mockResolvedValue(taskDetail.workspaces[0]);
-  vi.mocked(consoleApi.cleanupTaskWorkspace).mockResolvedValue({
-    ...taskDetail.workspaces[0],
-    status: "cleaned"
-  });
   vi.mocked(consoleApi.createReviewIntent).mockResolvedValue(taskDetail.reviewIntents[0]);
   vi.mocked(consoleApi.cancelReviewIntent).mockResolvedValue({
     ...taskDetail.reviewIntents[0],
@@ -502,16 +466,10 @@ describe("前端重构后的控制台骨架", () => {
     expect(screen.queryByText(/moved to review/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/workflow state/i)).not.toBeInTheDocument();
 
-    // 工作区作为侧栏常驻卡片，路径与分支直接可见
-    expect(screen.getByText(TEST_WORKSPACE_PATH)).toBeInTheDocument();
-    expect(screen.getByText("task/task-user-login")).toBeInTheDocument();
+    // 工作区历史快照不再展示，避免旧任务死路径和新任务空白态进入 Console。
+    expect(screen.queryByText("工作区")).not.toBeInTheDocument();
+    expect(screen.queryByText("task/task-user-login")).not.toBeInTheDocument();
 
-    // 点击侧栏「查看详情」按钮打开工作区抽屉
-    fireEvent.click(screen.getByRole("button", { name: "查看工作区详情" }));
-    expect(await screen.findByRole("dialog", { name: "工作区详情" })).toBeInTheDocument();
-
-    // 关闭再开评审抽屉
-    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
     fireEvent.click(screen.getByRole("button", { name: "查看评审" }));
     expect(await screen.findByRole("dialog", { name: "评审详情" })).toBeInTheDocument();
     expect(screen.getByText("评审状态：通过")).toBeInTheDocument();
@@ -545,7 +503,6 @@ describe("前端重构后的控制台骨架", () => {
     vi.mocked(consoleApi.fetchTaskDetail).mockResolvedValue({
       ...taskDetail,
       ...archivedTask,
-      workspaces: [],
       reviewIntents: [],
       linkedDocuments: [
         {
@@ -562,7 +519,6 @@ describe("前端重构后的控制台骨架", () => {
     render(<App />);
 
     expect(await screen.findByText("子任务")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "创建工作区" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "标记评审通过" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "标记完成" })).not.toBeInTheDocument();
   });

@@ -81,7 +81,9 @@ function assertTightRequirementMarkdown(content: string): void {
   assert.match(content, /\n---\n\n> ⚠️ Requirement status canonical 在本 md，Console 仅投影展示。\n\n## 需求描述/);
   assert.match(content, /^## 原话（verbatim）$/m);
   assert.match(content, /^## 二、背景与目标$/m);
+  assert.match(content, /^## 二、背景与目标\n\n> 📌 目标对齐：/m);
   assert.match(content, /^## 十三、风险$/m);
+  assert.match(content, /^## 十三、风险\n\n> 📌 列出会影响交付、体验或数据安全的风险，以及对应处理方式。$/m);
   assert.match(content, /^## Claude 解读$/m);
   assert.match(content, /^## 歧义点$/m);
   assert.match(content, /^## 保真差异$/m);
@@ -140,6 +142,7 @@ describe("renderRequirementMarkdown", () => {
     assert.ok(claudeIndex > bodyEndIndex, "expected Claude projection anchor after template body");
     assert.ok(ambiguityIndex > claudeIndex, "expected ambiguities after Claude projection");
     assert.ok(fidelityIndex > ambiguityIndex, "expected fidelity diff after ambiguities");
+    assert.equal((body.match(/^> 📌 /gm) ?? []).length, 12, "expected one guidance line per body section");
 
     assert.deepEqual(parseRequirementSections(body), {
       description: "需求描述正文",
@@ -486,6 +489,72 @@ status: active
 
     const cleared = await prisma.requirement.findUniqueOrThrow({ where: { id } });
     assert.equal(cleared.planDocPath, null);
+
+    await rm(localPath, { recursive: true, force: true });
+  });
+
+  test("template conformance expressionIssues are gated by expression_spec v1", async () => {
+    const { projectId, localPath } = await makeProjectFixture();
+    const designDir = join(localPath, "docs", "03_开发计划");
+    const designPath = join(designDir, "expression-gate-技术设计.md");
+    await mkdir(designDir, { recursive: true });
+    const designBody = [
+      "# 表达检查技术设计",
+      "",
+      "## 一、设计概述",
+      "",
+      "概述。",
+      "",
+      "## 二、方案与架构",
+      "",
+      "方案。",
+      "",
+      "## 四、核心流程 / 逻辑",
+      "",
+      "流程。",
+      "",
+      "## 五、测试策略",
+      "",
+      "测试。"
+    ].join("\n");
+
+    await writeFile(
+      designPath,
+      ["---", "doc_type: technical_design", "requirement_id: req-expression-gate", "title: 表达检查", "expression_spec: v1", "---", "", designBody].join("\n"),
+      "utf8"
+    );
+    await scanProject(prisma, projectId);
+    const gatedJob = await prisma.syncJob.findFirstOrThrow({
+      where: { projectId, jobType: "template_conformance" },
+      orderBy: { startedAt: "desc" }
+    });
+    assert.equal(gatedJob.status, "partial");
+    const gatedWarnings = JSON.parse(gatedJob.errorMessage ?? "[]") as Array<{
+      path: string;
+      missingSections: string[];
+      expressionIssues: string[];
+    }>;
+    assert.deepEqual(gatedWarnings, [
+      {
+        path: "docs/03_开发计划/expression-gate-技术设计.md",
+        docType: "technical_design",
+        missingSections: [],
+        expressionIssues: ["缺少「目标对齐」表达块", "缺少「模拟示例」或「无需示例」说明"]
+      }
+    ]);
+
+    await writeFile(
+      designPath,
+      ["---", "doc_type: technical_design", "requirement_id: req-expression-gate", "title: 表达检查", "---", "", designBody].join("\n"),
+      "utf8"
+    );
+    await scanProject(prisma, projectId);
+    const ungatedJob = await prisma.syncJob.findFirstOrThrow({
+      where: { projectId, jobType: "template_conformance" },
+      orderBy: { startedAt: "desc" }
+    });
+    assert.equal(ungatedJob.status, "success");
+    assert.equal(ungatedJob.errorMessage, null);
 
     await rm(localPath, { recursive: true, force: true });
   });

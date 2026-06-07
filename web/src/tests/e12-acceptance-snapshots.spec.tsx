@@ -51,8 +51,6 @@ vi.mock("../lib/console-api.js", () => ({
   fetchSyncJobs: vi.fn(),
   createRequirement: vi.fn(),
   uploadRequirementAsset: vi.fn(),
-  createTaskWorkspace: vi.fn(),
-  cleanupTaskWorkspace: vi.fn(),
   dispatchTaskAnchorCommand: vi.fn(),
   createReviewIntent: vi.fn(),
   cancelReviewIntent: vi.fn(),
@@ -213,26 +211,6 @@ const taskDetail: TaskDetailView = {
       kind: "receipt",
       title: "E12 fixture receipt",
       status: "ready"
-    }
-  ],
-  workspaces: [
-    {
-      id: "workspace-e12",
-      projectId,
-      taskId,
-      taskKey: "e12-fixture-implementation",
-      baseRef: "HEAD",
-      branchName: "task/e12-fixture-implementation",
-      workspacePath: "/tmp/su-ccb/e12-fixture/.workspaces/e12-fixture-implementation",
-      status: "ready",
-      lockMode: "exclusive",
-      cleanupPolicy: "manual",
-      lockedByRunId: null,
-      cleanupAfter: null,
-      lastVerifiedAt: null,
-      errorMessage: null,
-      createdAt: "2026-05-04T09:45:00.000",
-      updatedAt: "2026-05-04T09:45:00.000"
     }
   ],
   verificationResult: {
@@ -453,7 +431,7 @@ describe("E12 acceptance DOM baselines", () => {
   });
 
   it("captures task detail v2 default node baseline", async () => {
-    const container = await renderRoute(`/tasks/${taskId}`, /工作区/);
+    const container = await renderRoute(`/tasks/${taskId}`, /Implementation acceptance/);
 
     expect(screen.getByTestId("task-detail-page")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "任务节点" })).toBeInTheDocument();
@@ -462,7 +440,7 @@ describe("E12 acceptance DOM baselines", () => {
   });
 
   it("captures task detail v2 legacy tab redirect baseline", async () => {
-    const container = await renderRoute(`/tasks/${taskId}?tab=node-flow`, /工作区/);
+    const container = await renderRoute(`/tasks/${taskId}?tab=node-flow`, /Implementation acceptance/);
 
     await waitFor(() => {
       expect(window.location.search).toBe("?node=implementation");
@@ -555,11 +533,6 @@ function mockConsoleApi(): void {
   });
   vi.mocked(consoleApi.fetchSyncJobs).mockResolvedValue(syncJobs);
   vi.mocked(consoleApi.createRequirement).mockResolvedValue(requirements[0]);
-  vi.mocked(consoleApi.createTaskWorkspace).mockResolvedValue(taskDetail.workspaces[0]);
-  vi.mocked(consoleApi.cleanupTaskWorkspace).mockResolvedValue({
-    ...taskDetail.workspaces[0],
-    status: "cleaned"
-  });
   vi.mocked(consoleApi.createReviewIntent).mockResolvedValue(taskDetail.reviewIntents[0]);
   vi.mocked(consoleApi.cancelReviewIntent).mockResolvedValue({
     ...taskDetail.reviewIntents[0],

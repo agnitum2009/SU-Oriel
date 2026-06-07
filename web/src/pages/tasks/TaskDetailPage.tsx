@@ -17,11 +17,9 @@ import { NodeStepper } from "../../components/task-detail-v2/NodeStepper.js";
 import { PropertiesDrawer } from "../../components/task-detail-v2/PropertiesDrawer.js";
 import { ReviewDrawer } from "../../components/task-detail-v2/ReviewDrawer.js";
 import { StatusStrip } from "../../components/task-detail-v2/StatusStrip.js";
-import { WorkspaceDrawer } from "../../components/task-detail-v2/WorkspaceDrawer.js";
 import { DerivedFollowupsCard } from "../../components/task-detail-v2/sidebar/DerivedFollowupsCard.js";
 import { DocumentsCard } from "../../components/task-detail-v2/sidebar/DocumentsCard.js";
 import { TaskSidebar } from "../../components/task-detail-v2/sidebar/TaskSidebar.js";
-import { WorkspaceCard } from "../../components/task-detail-v2/sidebar/WorkspaceCard.js";
 import type { NodeDetail, NodeId, NodeStatus } from "../../components/task-detail-v2/types.js";
 import {
   cancelReviewIntent,
@@ -34,7 +32,7 @@ import { useTaskNodeFlow } from "../../lib/use-task-node-flow.js";
 import { useDetailStore } from "../../stores/detail-store.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
-import type { ReviewIntentView, TaskDetailView, TaskWorkspaceView } from "../../types/task.js";
+import type { ReviewIntentView, TaskDetailView } from "../../types/task.js";
 
 interface TaskDetailPageProps {
   task: TaskDetailView;
@@ -51,7 +49,7 @@ interface PendingTaskDispatch {
   command: string;
 }
 
-type DrawerKind = "properties" | "workspace" | "review" | "advanced" | "checkpoints-list" | null;
+type DrawerKind = "properties" | "review" | "advanced" | "checkpoints-list" | null;
 
 const NODE_IDS: NodeId[] = [
   "requirement_analysis",
@@ -87,10 +85,6 @@ function nodeStatus(nodeId: NodeId, current: NodeId, task: TaskDetailView): Node
   return NODE_IDS.indexOf(nodeId) < NODE_IDS.indexOf(current) ? "done" : "idle";
 }
 
-function findActiveWorkspace(workspaces: TaskWorkspaceView[]): TaskWorkspaceView | null {
-  return workspaces.find((ws) => ["creating", "ready", "in_use", "cleanup_pending"].includes(ws.status)) ?? null;
-}
-
 function serializeDraft(draft: TaskDraft): string {
   return JSON.stringify(draft);
 }
@@ -122,8 +116,6 @@ export function TaskDetailPage({ task }: TaskDetailPageProps) {
   const current = currentNodeId(task);
   const selectedNodeId: NodeId = isNodeId(searchParams.get("node")) ? (searchParams.get("node") as NodeId) : current;
   const isExecutable = isExecutableTask(task);
-  const activeWorkspace = findActiveWorkspace(task.workspaces ?? []);
-  const historicalWorkspaces = (task.workspaces ?? []).filter((ws) => ws.id !== activeWorkspace?.id);
 
   const nodes = useMemo(
     () => NODE_IDS.map((id) => ({ id, label: nodeLabel(id), status: nodeStatus(id, current, task) })),
@@ -423,12 +415,6 @@ export function TaskDetailPage({ task }: TaskDetailPageProps) {
         </div>
 
         <TaskSidebar>
-          <WorkspaceCard
-            activeWorkspace={activeWorkspace}
-            isExecutable={isExecutable}
-            onCopyPath={handleCopyPath}
-            onOpenDetail={() => setDrawer("workspace")}
-          />
           <DocumentsCard documents={task.linkedDocuments} onOpenDocument={setPreviewDocId} />
           <DerivedFollowupsCard
             sourceRequirementId={task.requirementId ?? null}
@@ -447,15 +433,6 @@ export function TaskDetailPage({ task }: TaskDetailPageProps) {
         priority={draft.priority}
         progress={draft.progress}
         saving={savingTask}
-      />
-
-      <WorkspaceDrawer
-        activeWorkspace={activeWorkspace}
-        historicalWorkspaces={historicalWorkspaces}
-        isExecutable={isExecutable}
-        isOpen={drawer === "workspace"}
-        onClose={() => setDrawer(null)}
-        onCopyPath={handleCopyPath}
       />
 
       <ReviewDrawer

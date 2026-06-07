@@ -48,25 +48,6 @@ export interface TaskTimelineView {
   events: TaskTimelineEventView[];
 }
 
-export interface TaskWorkspaceView {
-  id: string;
-  projectId: string;
-  taskId: string;
-  taskKey: string;
-  baseRef: string;
-  branchName: string;
-  workspacePath: string;
-  status: string;
-  lockMode: string;
-  cleanupPolicy: string;
-  lockedByRunId: string | null;
-  cleanupAfter: string | null;
-  lastVerifiedAt: string | null;
-  errorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface AnchorStartResponse {
   anchorId: string;
   anchorPath: string;
@@ -150,7 +131,6 @@ export interface TaskDetailView extends TaskView {
     title: string;
     status: string | null;
   }>;
-  workspaces: TaskWorkspaceView[];
   verificationResult: unknown | null;
   reviewFollowup: string[];
   reviewIntents: ReviewIntentView[];

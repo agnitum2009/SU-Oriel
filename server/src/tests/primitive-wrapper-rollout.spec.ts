@@ -11,7 +11,6 @@ import { prisma } from "../db/prisma.js";
 import { createRequirement, generateTaskFromRequirement, scanProject } from "../indexer/project-indexer.js";
 import { submitEventJournal } from "../modules/events/event-journal.service.js";
 import { primitiveExecutor } from "../modules/primitive/primitive-wrapper.js";
-import { cleanupTaskWorkspace, createTaskWorkspace } from "../modules/workspace/workspace.service.js";
 
 const createdProjectIds = new Set<string>();
 const createdEventIds = new Set<string>();
@@ -533,46 +532,4 @@ test("apply_requirement_diff uses primitive wrapper for Requirement create", asy
   assert.equal(requirement.status, "drafting");
   assert.ok(requirementCalls.some(([input]) => input.mutationType === "prisma.requirement.create"));
   assert.equal(requirementCalls.some(([input]) => input.mutationType === "prisma.requirement.update"), false);
-});
-
-test("apply_task_workspace_state uses primitive wrapper for workspace create and error update", async () => {
-  const fixture = await createTaskFixture();
-  const runSpy = vi.spyOn(primitiveExecutor, "run");
-
-  const result = await createTaskWorkspace(prisma, fixture.taskId, {
-    baseRef: "HEAD",
-    lockMode: "exclusive",
-    cleanupPolicy: "manual"
-  });
-  const workspaceCalls = runSpy.mock.calls.filter(([input]) => input.primitive === "apply_task_workspace_state");
-
-  assert.equal(result.statusCode, 400);
-  assert.equal(result.workspace.status, "error");
-  assert.equal(workspaceCalls.length, 2);
-  assert.ok(workspaceCalls.every(([input]) => input.mutationType === "prisma.taskWorkspace.create/update"));
-});
-
-test("cleanup_task_workspace uses primitive wrapper for cleanup pending and cleaned updates", async () => {
-  const fixture = await createTaskFixture();
-  const workspace = await prisma.taskWorkspace.create({
-    data: {
-      projectId: fixture.projectId,
-      taskId: fixture.taskId,
-      taskKey: fixture.taskKey,
-      baseRef: "HEAD",
-      branchName: `task/${fixture.taskKey}`,
-      workspacePath: join(fixture.projectRoot, ".workspaces", fixture.taskKey),
-      status: "ready",
-      lockMode: "exclusive",
-      cleanupPolicy: "manual"
-    }
-  });
-  const runSpy = vi.spyOn(primitiveExecutor, "run");
-
-  const result = await cleanupTaskWorkspace(prisma, workspace.id);
-  const cleanupCalls = runSpy.mock.calls.filter(([input]) => input.primitive === "cleanup_task_workspace");
-
-  assert.equal(result.status, "cleaned");
-  assert.equal(cleanupCalls.length, 2);
-  assert.ok(cleanupCalls.every(([input]) => input.mutationType === "prisma.taskWorkspace.update"));
 });

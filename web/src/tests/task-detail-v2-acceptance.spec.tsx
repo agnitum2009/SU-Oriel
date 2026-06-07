@@ -47,8 +47,6 @@ vi.mock("../lib/console-api.js", () => ({
   createRequirement: vi.fn(),
   fetchSlots: vi.fn(),
   fetchTerminalDescriptor: vi.fn(),
-  createTaskWorkspace: vi.fn(),
-  cleanupTaskWorkspace: vi.fn(),
   dispatchTaskAnchorCommand: vi.fn(),
   createReviewIntent: vi.fn(),
   cancelReviewIntent: vi.fn(),
@@ -112,24 +110,6 @@ const detail: TaskDetailView = {
   ...task,
   linkedRequirement: { id: "req-1", title: "PR12 requirement", verbatimSource: "Cut over to task detail v2." },
   linkedDocuments: [{ id: "doc-dev-task", path: "docs/03_开发计划/task-pr12-开发任务.md", kind: "dev_task", title: "PR12 dev task", status: "reviewing" }],
-  workspaces: [{
-    id: "workspace-1",
-    projectId: "project-1",
-    taskId: "task-1",
-    taskKey: "task-pr12",
-    baseRef: "HEAD",
-    branchName: "task/pr12",
-    workspacePath: "/tmp/pr12/.workspaces/task-pr12",
-    status: "ready",
-    lockMode: "exclusive",
-    cleanupPolicy: "manual",
-    lockedByRunId: null,
-    cleanupAfter: null,
-    lastVerifiedAt: null,
-    errorMessage: null,
-    createdAt: "2026-05-09T00:00:00.000Z",
-    updatedAt: "2026-05-09T00:00:00.000Z"
-  }],
   verificationResult: { test: "pass" },
   reviewFollowup: [],
   reviewIntents: []
@@ -351,8 +331,6 @@ function mockConsoleApi(): void {
   });
   vi.mocked(consoleApi.fetchTaskDetail).mockResolvedValue(detail);
   vi.mocked(consoleApi.updateTask).mockResolvedValue(task);
-  vi.mocked(consoleApi.createTaskWorkspace).mockResolvedValue(detail.workspaces[0]);
-  vi.mocked(consoleApi.cleanupTaskWorkspace).mockResolvedValue({ ...detail.workspaces[0], status: "cleaned" });
   vi.mocked(consoleApi.createReviewIntent).mockResolvedValue({
     id: "intent-1",
     projectId: "project-1",
