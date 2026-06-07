@@ -1,4 +1,8 @@
-import type { SlotTerminalSnapshotFrame } from "../../types/slot-terminal.js";
+import type {
+  SlotTerminalFrame,
+  SlotTerminalResetFrame,
+  SlotTerminalSnapshotFrame
+} from "../../types/slot-terminal.js";
 
 export const SLOT_TERMINAL_FULL_FRAME_CLEAR = "\x1b[H\x1b[2J";
 
@@ -9,16 +13,27 @@ export interface SlotTerminalWritableTerminal {
       viewportY: number;
     };
   };
+  reset(): void;
   scrollToBottom?(): void;
   resize(cols: number, rows: number): void;
   write(data: string, callback?: () => void): void;
 }
 
+type SlotTerminalStructuralFrame = SlotTerminalSnapshotFrame | SlotTerminalResetFrame;
+
+interface TerminalWriteOperation {
+  data: string;
+  prepare?: () => boolean;
+}
+
 export class SlotTerminalFrameRenderer {
   private readonly terminal: SlotTerminalWritableTerminal;
   private readonly scrollHost: HTMLElement | null;
-  private pendingFrame: SlotTerminalSnapshotFrame | null = null;
+  private pendingFrame: SlotTerminalStructuralFrame | null = null;
   private animationFrame: number | null = null;
+  private writeQueue: TerminalWriteOperation[] = [];
+  private writeActive = false;
+  private disposed = false;
   private lastGeneration = 0;
   private lastFrameKey: string | null = null;
   private lastSizeKey: string | null = null;
@@ -28,16 +43,42 @@ export class SlotTerminalFrameRenderer {
     this.scrollHost = scrollHost;
   }
 
-  applyFrame(frame: SlotTerminalSnapshotFrame): void {
+  applyFrame(frame: SlotTerminalFrame): void {
+    if (this.disposed) {
+      return;
+    }
+    if (frame.kind === "stream") {
+      this.flushPendingFrame();
+      this.enqueueWrite({ data: frame.data });
+      return;
+    }
+    this.scheduleStructuralFrame(frame);
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.animationFrame !== null) {
+      cancelRenderFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+    this.pendingFrame = null;
+    this.writeQueue = [];
+  }
+
+  private scheduleStructuralFrame(frame: SlotTerminalStructuralFrame): void {
     if (frame.generation <= this.lastGeneration) {
       return;
     }
+    if (this.pendingFrame && isResetFrame(this.pendingFrame) && !isResetFrame(frame)) {
+      this.flushPendingFrame();
+    }
     const frameKey = `${frame.cols}x${frame.rows}\u0000${frame.data}`;
-    if (frameKey === this.lastFrameKey) {
+    if (!isResetFrame(frame) && frameKey === this.lastFrameKey) {
       this.lastGeneration = frame.generation;
       return;
     }
     this.pendingFrame = frame;
+    this.lastGeneration = frame.generation;
     if (this.animationFrame !== null) {
       return;
     }
@@ -47,12 +88,12 @@ export class SlotTerminalFrameRenderer {
     });
   }
 
-  dispose(): void {
+  private flushPendingFrame(): void {
     if (this.animationFrame !== null) {
       cancelRenderFrame(this.animationFrame);
       this.animationFrame = null;
     }
-    this.pendingFrame = null;
+    this.flush();
   }
 
   private flush(): void {
@@ -61,28 +102,65 @@ export class SlotTerminalFrameRenderer {
       return;
     }
     this.pendingFrame = null;
-    this.lastGeneration = frame.generation;
     this.lastFrameKey = `${frame.cols}x${frame.rows}\u0000${frame.data}`;
     const cols = normalizeTerminalDimension(frame.cols);
     const rows = normalizeTerminalDimension(frame.rows);
     const sizeKey = `${cols}x${rows}`;
-    // 跟随判定必须在 resize 之前测：resize 会改变 xterm 行数与 host.scrollHeight，
-    // 之后再测会把"原本贴底"误判成"已离底"。双底部 = xterm 历史在底 且 host 外滚在底。
-    const shouldFollow = isTerminalAtBottom(this.terminal) && isHostAtBottom(this.scrollHost);
-    if (sizeKey !== this.lastSizeKey) {
-      this.terminal.resize(cols, rows);
-      this.lastSizeKey = sizeKey;
-    }
     const data = stripTrailingFrameNewline(frame.data);
-    const payload = frame.initial ? data : `${SLOT_TERMINAL_FULL_FRAME_CLEAR}${data}`;
-    this.terminal.write(payload, () => {
-      if (shouldFollow) {
-        this.terminal.scrollToBottom?.();
-        if (this.scrollHost) {
-          this.scrollHost.scrollTop = this.scrollHost.scrollHeight;
+    const shouldReset = isResetFrame(frame) || frame.initial;
+    const payload = shouldReset ? data : `${SLOT_TERMINAL_FULL_FRAME_CLEAR}${data}`;
+    this.enqueueWrite({
+      data: payload,
+      prepare: () => {
+        // 跟随判定必须在 reset/resize 之前测：resize 会改变 xterm 行数与 host.scrollHeight，
+        // 之后再测会把"原本贴底"误判成"已离底"。双底部 = xterm 历史在底 且 host 外滚在底。
+        const shouldFollow = this.shouldFollow();
+        if (shouldReset) {
+          this.terminal.reset();
+          this.lastSizeKey = null;
         }
+        if (sizeKey !== this.lastSizeKey) {
+          this.terminal.resize(cols, rows);
+          this.lastSizeKey = sizeKey;
+        }
+        return shouldFollow;
       }
     });
+  }
+
+  private enqueueWrite(operation: TerminalWriteOperation): void {
+    this.writeQueue.push(operation);
+    this.drainWriteQueue();
+  }
+
+  private drainWriteQueue(): void {
+    if (this.writeActive || this.disposed) {
+      return;
+    }
+    const operation = this.writeQueue.shift();
+    if (!operation) {
+      return;
+    }
+    this.writeActive = true;
+    const shouldFollow = operation.prepare?.() ?? this.shouldFollow();
+    this.terminal.write(operation.data, () => {
+      if (!this.disposed && shouldFollow) {
+        this.followToBottom();
+      }
+      this.writeActive = false;
+      this.drainWriteQueue();
+    });
+  }
+
+  private shouldFollow(): boolean {
+    return isTerminalAtBottom(this.terminal) && isHostAtBottom(this.scrollHost);
+  }
+
+  private followToBottom(): void {
+    this.terminal.scrollToBottom?.();
+    if (this.scrollHost) {
+      this.scrollHost.scrollTop = this.scrollHost.scrollHeight;
+    }
   }
 }
 
@@ -109,6 +187,10 @@ function isHostAtBottom(host: HTMLElement | null): boolean {
 
 function normalizeTerminalDimension(value: number): number {
   return Math.max(1, Math.floor(Number.isFinite(value) ? value : 1));
+}
+
+function isResetFrame(frame: SlotTerminalStructuralFrame): frame is SlotTerminalResetFrame {
+  return frame.kind === "reset";
 }
 
 function requestRenderFrame(callback: () => void): number {

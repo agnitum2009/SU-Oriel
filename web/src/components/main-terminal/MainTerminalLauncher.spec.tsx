@@ -19,6 +19,7 @@ const xtermMocks = vi.hoisted(() => {
     dispose = vi.fn();
     loadAddon = vi.fn();
     open = vi.fn();
+    reset = vi.fn();
     resize = vi.fn();
     scrollToBottom = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());
@@ -178,9 +179,27 @@ describe("MainTerminalLauncher", () => {
     );
 
     MockSlotTerminalWebSocket.instances[0].open();
-    MockSlotTerminalWebSocket.instances[0].serverSend({ type: "frame", data: "main claude\n", cols: 80, rows: 24, generation: 1, initial: true });
+    MockSlotTerminalWebSocket.instances[0].serverSend({
+      type: "frame",
+      data: "main claude\n",
+      cols: 80,
+      rows: 24,
+      generation: 1,
+      initial: true,
+      mode: "snapshot-fallback"
+    });
     await nextRenderFrame();
     expect(xtermMocks.MockTerminal.instances[0].write).toHaveBeenCalledWith("main claude", expect.any(Function));
+    expect(await screen.findByText("历史受限(快照模式)")).toBeInTheDocument();
+
+    MockSlotTerminalWebSocket.instances[0].serverSend({
+      type: "frame",
+      kind: "stream",
+      data: "live chunk",
+      seq: 1,
+      mode: "stream"
+    });
+    await waitFor(() => expect(screen.queryByText("历史受限(快照模式)")).not.toBeInTheDocument());
 
     xtermMocks.MockTerminal.instances[0].emitData("echo ok");
     expect(MockSlotTerminalWebSocket.instances[0].sentFrames()).toContainEqual({ type: "input", data: "echo ok" });
