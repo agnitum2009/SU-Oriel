@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, test } from "vitest";
 
 import {
+  buildManagedCcbConfig,
   MANAGED_AGENT_NAMES,
   MANAGED_WINDOW_NAMES,
   ensureManagedCcbConfig,
@@ -24,6 +25,15 @@ async function projectRoot(): Promise<string> {
   tmpRoots.push(root);
   return root;
 }
+
+test("buildManagedCcbConfig keeps the slotCount 3 empty-overrides golden output byte-for-byte", async () => {
+  const golden = await readFile(
+    new URL("./fixtures/managed-ccb-config-slotcount-3.golden.toml", import.meta.url),
+    "utf8"
+  );
+
+  assert.equal(buildManagedCcbConfig(), golden);
+});
 
 test("renderManagedCcbConfig emits v7 main plus three slot windows and eight managed agents", () => {
   const result = renderManagedCcbConfig({

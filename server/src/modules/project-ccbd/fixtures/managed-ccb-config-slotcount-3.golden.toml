@@ -1,0 +1,93 @@
+version = 2
+entry_window = "main"
+
+[windows]
+main = "main_claude:claude; main_codex:codex"
+slot-1 = "slot1_claude:claude; slot1_codex:codex"
+slot-2 = "slot2_claude:claude; slot2_codex:codex"
+slot-3 = "slot3_claude:claude; slot3_codex:codex"
+
+[ui.sidebar]
+mode = "every_window"
+width = "15%"
+bottom_height = 20
+
+[agents.main_claude]
+provider = "claude"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+model = "opus[1m]"
+startup_args = ["--effort", "max"]
+
+[agents.main_codex]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+
+[agents.slot1_claude]
+provider = "claude"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+model = "opus[1m]"
+startup_args = ["--effort", "max"]
+
+[agents.slot1_codex]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+
+[agents.slot2_claude]
+provider = "claude"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+model = "opus[1m]"
+startup_args = ["--effort", "max"]
+
+[agents.slot2_codex]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+
+[agents.slot3_claude]
+provider = "claude"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
+model = "opus[1m]"
+startup_args = ["--effort", "max"]
+
+[agents.slot3_codex]
+provider = "codex"
+target = "."
+workspace_mode = "inplace"
+runtime_mode = "pane-backed"
+restore = "auto"
+permission = "manual"
+queue_policy = "serial-per-agent"
