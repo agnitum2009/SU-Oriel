@@ -1,0 +1,30 @@
+reload_status: published
+dry_run: false
+mutation_enabled: true
+plan_class: add_window
+safe_to_apply: true
+future_safe_to_apply: true
+old_config_signature: 8cc012212e15051d6fd75cd7a8ccfa866b46928fcb7ffce2292c3cb997270cb7
+new_config_signature: cccf8ec3ac0cc56e2538a8551961341dfdd4ecf218bb412e348635dacbe61f9c
+reload_stage: publish_transaction
+reload_old_graph_version: 1
+reload_target_graph_version: 2
+reload_published_graph_version: 2
+reload_diagnostic: graph_published=true
+reload_diagnostic: lease_or_lifecycle_written=true
+reload_diagnostic: config_watch_started=false
+reload_diagnostic: unload_or_replace_executed=false
+reload_diagnostic: project_view_cache_invalidated=true
+reload_diagnostic: sidebar_refresh_signal_sent=false
+reload_operation: op=add_window window=slot-4 agents=slot4_claude,slot4_codex reason=window exists only in new config
+reload_operation: op=add_agent agent=slot4_claude window=slot-4 reason=agent exists only in new config
+reload_operation: op=add_agent agent=slot4_codex window=slot-4 reason=agent exists only in new config
+reload_namespace_patch_status: planned
+reload_namespace_patch_apply_deferred: true
+reload_namespace_patch_step: action=create_window window=slot-4 managed_by=ccbd reason=window exists only in new config
+reload_namespace_patch_step: action=create_sidebar_pane window=slot-4 role=sidebar slot_key=sidebar:slot-4 managed_by=ccbd reason=new managed window needs a sidebar pane
+reload_namespace_patch_step: action=create_agent_pane window=slot-4 agent=slot4_claude role=agent slot_key=slot4_claude managed_by=ccbd reason=new managed window needs an agent pane
+reload_namespace_patch_step: action=create_agent_pane window=slot-4 agent=slot4_codex role=agent slot_key=slot4_codex managed_by=ccbd reason=new managed window needs an agent pane
+reload_reason: add_window slot-4: window exists only in new config
+reload_reason: add_agent slot4_claude: agent exists only in new config
+reload_reason: add_agent slot4_codex: agent exists only in new config
