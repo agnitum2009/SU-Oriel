@@ -20,12 +20,14 @@ async function resetDatabase(): Promise<void> {
   await prisma.project.deleteMany();
 }
 
-async function createBusySlotFixture() {
+async function createBusySlotFixture(options: { slotId?: string; slotCount?: number } = {}) {
   const suffix = randomUUID();
+  const slotId = options.slotId ?? "slot-3";
   const project = await prisma.project.create({
     data: {
       name: `user-intent-slot-${suffix}`,
-      localPath: join(tmpdir(), `user-intent-slot-${suffix}`)
+      localPath: join(tmpdir(), `user-intent-slot-${suffix}`),
+      slotCount: options.slotCount ?? 3
     }
   });
   const requirement = await prisma.requirement.create({
@@ -50,7 +52,7 @@ async function createBusySlotFixture() {
   await prisma.slotBinding.create({
     data: {
       projectId: project.id,
-      slotId: "slot-3",
+      slotId,
       requirementId: requirement.id,
       state: "busy",
       boundAt: new Date("2026-05-24T00:00:00.000Z"),
@@ -167,6 +169,57 @@ test("resume redispatches pending intent to the sticky slot claude agent without
     assert.equal(binding.state, "busy");
     assert.notEqual(binding.busySince, null);
     assert.equal(await prisma.anchorAllocation.count(), 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("stop-and-append and resume accept slot-4 when the project has four slots", async () => {
+  const { project, task } = await createBusySlotFixture({ slotId: "slot-4", slotCount: 4 });
+  const cancel = vi.fn(async () => ({}));
+  const submit = vi.fn(async () => ({ jobId: "job-resume-slot-4", traceRef: "trace-slot-4" }));
+  const app = Fastify();
+  await app.register(registerUserIntentRoutes, {
+    prismaClient: prisma,
+    slotRuntime: { cancel, submit }
+  } as never);
+
+  try {
+    const stopped = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.id}/stop-and-append`,
+      payload: {
+        intentType: "append_instruction",
+        body: "append this after stopping slot four",
+        ccbJobId: "job-current-slot-4"
+      }
+    });
+
+    assert.equal(stopped.statusCode, 200, stopped.body);
+    assert.equal(stopped.json().cancelledJobId, "job-current-slot-4");
+    assert.equal(stopped.json().slotId, "slot-4");
+    assert.equal(stopped.json().slotState, "bound");
+    assert.deepEqual(cancel.mock.calls[0], [{ projectRoot: project.localPath, jobId: "job-current-slot-4" }]);
+
+    const resumed = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.id}/resume`,
+      payload: {}
+    });
+
+    assert.equal(resumed.statusCode, 200, resumed.body);
+    assert.equal(resumed.json().slotId, "slot-4");
+    assert.deepEqual(submit.mock.calls[0], [{
+      projectRoot: project.localPath,
+      slotId: "slot-4",
+      toAgent: "slot4_claude",
+      taskId: task.taskKey,
+      body: `/ccb:su-resume task_id=${task.id} intent_id=${stopped.json().intentId}`
+    }]);
+    const binding = await prisma.slotBinding.findUniqueOrThrow({
+      where: { projectId_slotId: { projectId: project.id, slotId: "slot-4" } }
+    });
+    assert.equal(binding.state, "busy");
   } finally {
     await app.close();
   }

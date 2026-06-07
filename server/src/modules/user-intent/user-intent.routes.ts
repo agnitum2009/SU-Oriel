@@ -82,13 +82,13 @@ async function resolveSlotTaskContext(
 ): Promise<SlotTaskContext | null> {
   const task = await db.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { localPath: true } } }
+    include: { project: { select: { localPath: true, slotCount: true } } }
   });
   if (!task) {
     return null;
   }
   const binding = await new SlotBindingService(db).resolveSlotForSubtask(taskId);
-  const slotId = binding?.slotId && isSlotId(binding.slotId) ? binding.slotId : null;
+  const slotId = binding?.slotId && isSlotId(binding.slotId, task.project.slotCount) ? binding.slotId : null;
   return {
     projectId: task.projectId,
     projectRoot: task.project.localPath,

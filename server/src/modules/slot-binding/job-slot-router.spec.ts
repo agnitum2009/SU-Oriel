@@ -37,11 +37,12 @@ async function createRequirementFixture() {
   return { project, requirement };
 }
 
-async function createProjectWithRequirements(count: number) {
+async function createProjectWithRequirements(count: number, slotCount = 3) {
   const project = await prisma.project.create({
     data: {
       name: `job-slot-router-project-${randomUUID()}`,
-      localPath: join(tmpdir(), `job-slot-router-project-${randomUUID()}`)
+      localPath: join(tmpdir(), `job-slot-router-project-${randomUUID()}`),
+      slotCount
     }
   });
   const requirements = [];
@@ -140,6 +141,34 @@ test("JobSlotRouter queues overflow when all three slots are bound", async () =>
   const row = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: result.jobId } });
   assert.equal(row.anchorId, "slot-unassigned");
   assert.equal(row.status, "pending");
+});
+
+test("JobSlotRouter targets slot4_claude when the project has four slots", async () => {
+  const { project, requirements } = await createProjectWithRequirements(4, 4);
+  const slotBinding = new SlotBindingService(prisma);
+  for (const requirement of requirements.slice(0, 3)) {
+    await slotBinding.bindRequirement({ projectId: project.id, requirementId: requirement.id });
+  }
+  const submit = vi.fn(async () => ({ jobId: "ccbd-job-slot-4", traceRef: "trace-slot-4" }));
+  const router = new JobSlotRouter({
+    prismaClient: prisma,
+    slotBinding,
+    submitToSlot: submit,
+    submitImmediately: true
+  });
+
+  const result = await router.enqueue({
+    projectId: project.id,
+    requirementId: requirements[3].id,
+    subjectType: "requirement",
+    subjectId: requirements[3].id,
+    command: "/ccb:su-flow --payload {}"
+  });
+
+  assert.equal(result.status, "submitted");
+  assert.equal(result.slotId, "slot-4");
+  assert.equal(submit.mock.calls[0]?.[0].toAgent, "slot4_claude");
+  assert.equal(submit.mock.calls[0]?.[0].slotId, "slot-4");
 });
 
 test("JobSlotRouter.tick drains the oldest current-project queued request into an idle slot without worktree allocation", async () => {

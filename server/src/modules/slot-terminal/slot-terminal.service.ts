@@ -40,6 +40,7 @@ export type SlotTerminalBinding = Pick<SlotBinding, "projectId" | "slotId" | "re
 export type SlotTerminalProject = {
   id: string;
   localPath: string;
+  slotCount: number;
 };
 
 export interface SlotTerminalStore {
@@ -87,7 +88,7 @@ export class PrismaSlotTerminalStore implements SlotTerminalStore {
   async findProject(projectId: string): Promise<SlotTerminalProject | null> {
     return await this.client.project.findUnique({
       where: { id: projectId },
-      select: { id: true, localPath: true }
+      select: { id: true, localPath: true, slotCount: true }
     });
   }
 
@@ -242,7 +243,7 @@ export class SlotTerminalService {
       this.store.findBindingForRequirement(input.projectId, input.requirementId)
     ]);
 
-    if (!project || !isLiveRequirementBinding(binding, input.requirementId) || !isSlotId(binding.slotId)) {
+    if (!project || !isLiveRequirementBinding(binding, input.requirementId) || !isSlotId(binding.slotId, project.slotCount)) {
       throw new SlotTerminalNotFoundError("slot terminal binding not found");
     }
 

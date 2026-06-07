@@ -10,6 +10,7 @@ import {
 } from "../anchor-broker/anchor-dispatch-queue-policy.js";
 import { CcbdClientService } from "../ccbd-client/ccbd-client.service.js";
 import { emitEventInTransaction } from "../events/event-journal.service.js";
+import { agentNamesForSlot } from "../slot-topology/slot-topology.service.js";
 import { SlotBindingService, type SlotId, isSlotId } from "./slot-binding.service.js";
 
 export type SlotQueuedRequest = {
@@ -342,7 +343,7 @@ export function claudeAgentForSlot(slotId: string): string {
   if (!isSlotId(slotId)) {
     throw new Error(`invalid slot id: ${slotId}`);
   }
-  return `${slotId.replace("slot-", "slot")}_claude`;
+  return agentNamesForSlot(slotId)[0];
 }
 
 export function createSlotDispatchJobId(): string {

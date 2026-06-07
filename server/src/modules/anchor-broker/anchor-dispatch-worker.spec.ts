@@ -3,9 +3,10 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { beforeEach, test, vi } from "vitest";
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { prisma } from "../../db/prisma.js";
+import { CcbdClientService } from "../ccbd-client/ccbd-client.service.js";
 import { AnchorSocketNotReadyError } from "./anchor-broker.errors.js";
 import { runAnchorDispatchWorkerTick } from "./anchor-dispatch-worker.js";
 
@@ -120,6 +121,10 @@ beforeEach(async () => {
   await resetFixtures();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 test("runAnchorDispatchWorkerTick submits pending requirement dispatches and emits submitted event", async () => {
   const { requirement, anchor, queue } = await createRequirementQueueFixture();
   const askAcrossAnchor = vi.fn(async () => ({ jobId: "ccbd_job_1", traceRef: "trace-1" }));
@@ -219,4 +224,66 @@ test("runAnchorDispatchWorkerTick marks failed dispatches and emits failed event
   assert.equal(payload.jobId, queue.jobId);
   assert.equal(payload.errorCode, "ANCHOR_SOCKET_NOT_READY");
   assert.match(payload.errorMessage, /anchor socket is not ready/);
+});
+
+test("runAnchorDispatchWorkerTick submits slot-4 dispatches through the project slot runtime", async () => {
+  const suffix = randomUUID();
+  const project = await prisma.project.create({
+    data: {
+      name: `dispatch-worker-slot-${suffix}`,
+      localPath: join(tmpdir(), `ccb-dispatch-worker-slot-${suffix}`),
+      slotCount: 4
+    }
+  });
+  const requirement = await prisma.requirement.create({
+    data: {
+      projectId: project.id,
+      title: "Slot dispatch worker",
+      description: "Slot dispatch fixture",
+      status: "planning"
+    }
+  });
+  await prisma.slotBinding.create({
+    data: {
+      projectId: project.id,
+      slotId: "slot-4",
+      requirementId: requirement.id,
+      state: "bound",
+      boundAt: new Date("2026-06-06T10:00:00.000Z")
+    }
+  });
+  const queue = await prisma.anchorDispatchQueue.create({
+    data: {
+      jobId: "job_worker_slot_4",
+      anchorId: "slot-4",
+      subjectType: "requirement",
+      subjectId: requirement.id,
+      command: "/ccb:su-flow --payload {}",
+      status: "pending"
+    }
+  });
+  const submit = vi
+    .spyOn(CcbdClientService.prototype, "submit")
+    .mockResolvedValue({ jobId: "ccbd-slot-4", traceRef: "trace-slot-4" });
+  const waitForClaudeTuiReady = vi.fn(async () => ({
+    ready: true,
+    elapsedMs: 1,
+    lastTitles: ["slot-4"]
+  }));
+
+  const result = await runAnchorDispatchWorkerTick({
+    prismaClient: prisma,
+    waitForClaudeTuiReady
+  });
+
+  assert.deepEqual(result, { count: 1, submitted: 1, failed: 0 });
+  assert.deepEqual(waitForClaudeTuiReady.mock.calls[0], [project.localPath]);
+  assert.equal(submit.mock.calls[0]?.[0].toAgent, "slot4_claude");
+  assert.equal(submit.mock.calls[0]?.[0].taskId, requirement.id);
+  const updated = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { id: queue.id } });
+  assert.equal(updated.status, "submitted");
+  const binding = await prisma.slotBinding.findUniqueOrThrow({
+    where: { projectId_slotId: { projectId: project.id, slotId: "slot-4" } }
+  });
+  assert.equal(binding.state, "busy");
 });

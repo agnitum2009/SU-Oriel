@@ -19,11 +19,12 @@ async function resetDatabase(): Promise<void> {
   await prisma.project.deleteMany();
 }
 
-async function createProject() {
+async function createProject(slotCount = 3) {
   return await prisma.project.create({
     data: {
       name: `slot-route-${randomUUID()}`,
-      localPath: join(tmpdir(), `slot-route-${randomUUID()}`)
+      localPath: join(tmpdir(), `slot-route-${randomUUID()}`),
+      slotCount
     }
   });
 }
@@ -158,6 +159,71 @@ test("GET /api/projects/:projectId/slots projects main lane, three slots, queue,
     assert.equal(body.queue[0].jobId, "job-slot-route-queued");
     assert.equal(body.queue[0].requirementId, queuedRequirement.id);
     assert.equal(body.queue[0].requirementTitle, queuedRequirement.title);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/projects/:projectId/slots projects four lanes from project slotCount", async () => {
+  const project = await createProject(4);
+  const requirement = await prisma.requirement.create({
+    data: {
+      projectId: project.id,
+      title: "Slot Four Requirement",
+      description: "slot four route fixture",
+      status: "planning"
+    }
+  });
+  await prisma.slotBinding.create({
+    data: {
+      projectId: project.id,
+      slotId: "slot-4",
+      requirementId: requirement.id,
+      state: "unhealthy",
+      lastActivityAt: new Date("2026-05-10T00:00:00.000Z")
+    }
+  });
+  await prisma.eventJournal.create({
+    data: {
+      eventId: randomUUID(),
+      eventType: "slot_runtime_degraded",
+      projectId: project.id,
+      subjectType: "requirement",
+      subjectId: requirement.id,
+      subjectKey: requirement.title,
+      anchorId: "slot-4",
+      payloadJson: JSON.stringify({ slotId: "slot-4", reason: "busy_timeout", severity: "error" }),
+      emittedAt: new Date("2026-05-21T04:00:00.000Z"),
+      sourceActor: "system",
+      sourceComponent: "console"
+    }
+  });
+  const app = buildApp({ enableFileWatcher: false });
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/slots`
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json() as {
+      slots: Array<{
+        slotId: string;
+        state: string;
+        requirement: { id: string; title: string } | null;
+        unhealthy: { degradedReason: string | null; severity: string | null } | null;
+      }>;
+    };
+    assert.deepEqual(body.slots.map((slot) => slot.slotId), ["slot-1", "slot-2", "slot-3", "slot-4"]);
+    const slotFour = body.slots.find((slot) => slot.slotId === "slot-4");
+    assert.equal(slotFour?.state, "unhealthy");
+    assert.deepEqual(slotFour?.requirement, { id: requirement.id, title: requirement.title });
+    assert.deepEqual(slotFour?.unhealthy, {
+      degradedReason: "busy_timeout",
+      severity: "error",
+      emittedAt: "2026-05-21T04:00:00.000Z"
+    });
   } finally {
     await app.close();
   }

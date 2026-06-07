@@ -10,9 +10,13 @@ import {
   summarizeSlotContextResetResult
 } from "./slot-context-reset.service.js";
 import { syncSlotTips } from "./slot-tips-projection.service.js";
+import {
+  MAX_PROJECT_SLOT_COUNT,
+  slotIds as deriveSlotIds,
+  type SlotId
+} from "../slot-topology/slot-topology.service.js";
 
-export const SLOT_IDS = ["slot-1", "slot-2", "slot-3"] as const;
-export type SlotId = (typeof SLOT_IDS)[number];
+export type { SlotId };
 
 export type BindRequirementInput = {
   projectId: string;
@@ -46,7 +50,7 @@ export type SlotBindingServiceOptions = {
 
 type SlotBindingClient = Pick<
   PrismaClient | Prisma.TransactionClient,
-  "slotBinding" | "requirement" | "eventJournal"
+  "slotBinding" | "requirement" | "eventJournal" | "project"
 >;
 
 export class SlotBindingService {
@@ -82,6 +86,14 @@ export class SlotBindingService {
         return { binding: existing, newlyBound: false };
       }
 
+      const project = await tx.project.findUnique({
+        where: { id: input.projectId },
+        select: { slotCount: true }
+      });
+      if (!project) {
+        return null;
+      }
+      const projectSlotIds = deriveSlotIds(project.slotCount);
       const occupied = await tx.slotBinding.findMany({
         where: {
           projectId: input.projectId,
@@ -92,7 +104,7 @@ export class SlotBindingService {
         select: { slotId: true }
       });
       const occupiedIds = new Set(occupied.map((row) => row.slotId));
-      const slotId = SLOT_IDS.find((candidate) => !occupiedIds.has(candidate));
+      const slotId = projectSlotIds.find((candidate) => !occupiedIds.has(candidate));
       if (!slotId) {
         return null;
       }
@@ -328,6 +340,14 @@ export class SlotBindingService {
   }
 
   async backfillFromAnchorAllocations(projectId: string): Promise<{ bound: number; skipped: number }> {
+    const project = await this.client.project.findUnique({
+      where: { id: projectId },
+      select: { slotCount: true }
+    });
+    if (!project) {
+      return { bound: 0, skipped: 0 };
+    }
+    const projectSlotIds = deriveSlotIds(project.slotCount);
     const anchors = await this.client.anchorAllocation.findMany({
       where: {
         projectId,
@@ -338,7 +358,7 @@ export class SlotBindingService {
         }
       },
       orderBy: { updatedAt: "asc" },
-      take: SLOT_IDS.length
+      take: projectSlotIds.length
     });
     let bound = 0;
     for (const anchor of anchors) {
@@ -353,8 +373,8 @@ export class SlotBindingService {
   }
 }
 
-export function isSlotId(value: string): value is SlotId {
-  return (SLOT_IDS as readonly string[]).includes(value);
+export function isSlotId(value: string, slotCount: number = MAX_PROJECT_SLOT_COUNT): value is SlotId {
+  return (deriveSlotIds(slotCount) as readonly string[]).includes(value);
 }
 
 async function findRequirementIdForSubject(
@@ -457,9 +477,21 @@ export async function reconcileCancelledRequirementProjection(
   const releasedSlotIds: string[] = [];
   const busySlotIds: string[] = [];
   const service = new SlotBindingService(client);
+  const project = await client.project.findUnique({
+    where: { id: input.projectId },
+    select: { slotCount: true }
+  });
+  if (!project) {
+    return {
+      requirementCancelled: true,
+      superseded,
+      releasedSlotIds,
+      busySlotIds
+    };
+  }
 
   for (const binding of bindings) {
-    if (!isSlotId(binding.slotId)) {
+    if (!isSlotId(binding.slotId, project.slotCount)) {
       continue;
     }
     if (binding.state === "busy") {

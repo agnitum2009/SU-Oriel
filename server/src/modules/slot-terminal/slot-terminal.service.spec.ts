@@ -45,6 +45,7 @@ type FixtureOptions = {
   projectId?: string;
   requirementId?: string;
   slotId?: string;
+  slotCount?: number;
   bindingState?: SlotTerminalBinding["state"];
   includeBinding?: boolean;
 };
@@ -53,14 +54,15 @@ async function createFixture(options: FixtureOptions = {}) {
   const projectId = options.projectId ?? `project-${randomUUID()}`;
   const requirementId = options.requirementId ?? `req-${randomUUID()}`;
   const slotId = options.slotId ?? "slot-2";
+  const slotAgentPrefix = slotId.replace("slot-", "slot");
   const projectRoot = join(tmpdir(), `slot-terminal-${randomUUID()}`);
-  await writeRuntime(projectRoot, "slot2_claude", {
+  await writeRuntime(projectRoot, `${slotAgentPrefix}_claude`, {
     provider: "claude",
     tmux_window_name: slotId,
     pane_id: "%7",
     pane_title_marker: "unstable-title-that-must-not-be-used"
   });
-  await writeRuntime(projectRoot, "slot2_codex", {
+  await writeRuntime(projectRoot, `${slotAgentPrefix}_codex`, {
     provider: "codex",
     tmux_window_name: slotId,
     pane_id: "%8",
@@ -79,7 +81,7 @@ async function createFixture(options: FixtureOptions = {}) {
     state: options.bindingState ?? "bound"
   } as SlotTerminalBinding;
   const store = new FakeSlotTerminalStore(
-    new Map([[projectId, { id: projectId, localPath: projectRoot }]]),
+    new Map([[projectId, { id: projectId, localPath: projectRoot, slotCount: options.slotCount ?? 3 }]]),
     new Map([[requirementId, projectId]]),
     options.includeBinding === false ? [] : [binding]
   );
@@ -158,6 +160,21 @@ test("pane role resolution uses runtime window and provider metadata, not pane t
   assert.ok(listPanesCall);
   assert.equal(listPanesCall[1].some((arg) => arg.includes("pane_title")), false);
   assert.equal(listPanesCall[1].some((arg) => arg.includes("pane_current_command")), false);
+});
+
+test("resolveRequirementTerminal accepts slot-4 when the project topology has four slots", async () => {
+  const fixture = await createFixture({ slotId: "slot-4", slotCount: 4 });
+
+  const descriptor = await fixture.service.resolveRequirementTerminal({
+    projectId: fixture.projectId,
+    requirementId: fixture.requirementId
+  });
+
+  assert.equal(descriptor.slotId, "slot-4");
+  assert.deepEqual(descriptor.panes, [
+    { role: "claude", target: "%7", paneIndex: 2 },
+    { role: "codex", target: "%8", paneIndex: 3 }
+  ]);
 });
 
 test("assertTargetBelongsTo rejects cross-slot, cross-project, cross-pane, and non-whitelist role targets", async () => {
@@ -354,7 +371,7 @@ async function createAgentGroupFixture(options: {
   }
 
   const store = new FakeSlotTerminalStore(
-    new Map([[projectId, { id: projectId, localPath: projectRoot }]]),
+    new Map([[projectId, { id: projectId, localPath: projectRoot, slotCount: 3 }]]),
     new Map(),
     []
   );

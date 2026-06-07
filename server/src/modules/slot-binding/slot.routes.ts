@@ -5,7 +5,8 @@ import { prisma } from "../../db/prisma.js";
 import { AnchorDispatchQueuePolicyError } from "../anchor-broker/anchor-dispatch-queue-policy.js";
 import { CcbdClientService } from "../ccbd-client/ccbd-client.service.js";
 import { JobSlotRouter } from "./job-slot-router.js";
-import { SLOT_IDS, SlotBindingService, type SlotId } from "./slot-binding.service.js";
+import { SlotBindingService, isSlotId, type SlotId } from "./slot-binding.service.js";
+import { slotIds as deriveSlotIds } from "../slot-topology/slot-topology.service.js";
 import {
   createDefaultSlotContextResetter,
   summarizeSlotContextResetResult,
@@ -157,11 +158,12 @@ export async function registerSlotRoutes(
   });
 
   app.post("/api/projects/:projectId/slots/:slotId/release", async (request, reply) => {
-    const { projectId, slotId } = request.params as { projectId: string; slotId: string };
-    if (!isBusinessSlot(slotId)) {
-      reply.status(slotId === "main" ? 400 : 404);
-      return { message: slotId === "main" ? "main lane cannot bind or release business work" : "slot 不存在" };
+    const { projectId, slotId: requestedSlotId } = request.params as { projectId: string; slotId: string };
+    const validatedSlot = await validateBusinessSlot(db, projectId, requestedSlotId, "main lane cannot bind or release business work", reply);
+    if ("error" in validatedSlot) {
+      return validatedSlot.error;
     }
+    const slotId = validatedSlot.slotId;
 
     const input = (request.body ?? {}) as SlotReleaseInput;
     if (!input.confirm) {
@@ -222,11 +224,12 @@ export async function registerSlotRoutes(
   });
 
   app.post("/api/projects/:projectId/slots/:slotId/renew", async (request, reply) => {
-    const { projectId, slotId } = request.params as { projectId: string; slotId: string };
-    if (!isBusinessSlot(slotId)) {
-      reply.status(slotId === "main" ? 400 : 404);
-      return { message: slotId === "main" ? "main lane cannot bind business work" : "slot 不存在" };
+    const { projectId, slotId: requestedSlotId } = request.params as { projectId: string; slotId: string };
+    const validatedSlot = await validateBusinessSlot(db, projectId, requestedSlotId, "main lane cannot bind business work", reply);
+    if ("error" in validatedSlot) {
+      return validatedSlot.error;
     }
+    const slotId = validatedSlot.slotId;
 
     const binding = await db.slotBinding.findUnique({
       where: {
@@ -273,11 +276,12 @@ export async function registerSlotRoutes(
   });
 
   app.post("/api/projects/:projectId/slots/:slotId/archive", async (request, reply) => {
-    const { projectId, slotId } = request.params as { projectId: string; slotId: string };
-    if (!isBusinessSlot(slotId)) {
-      reply.status(slotId === "main" ? 400 : 404);
-      return { message: slotId === "main" ? "main lane cannot archive business work" : "slot 不存在" };
+    const { projectId, slotId: requestedSlotId } = request.params as { projectId: string; slotId: string };
+    const validatedSlot = await validateBusinessSlot(db, projectId, requestedSlotId, "main lane cannot archive business work", reply);
+    if ("error" in validatedSlot) {
+      return validatedSlot.error;
     }
+    const slotId = validatedSlot.slotId;
 
     const input = (request.body ?? {}) as SlotArchiveInput;
     if (!input.confirm) {
@@ -338,11 +342,12 @@ export async function registerSlotRoutes(
   });
 
   app.post("/api/projects/:projectId/slots/:slotId/cancel-current-job", async (request, reply) => {
-    const { projectId, slotId } = request.params as { projectId: string; slotId: string };
-    if (!isBusinessSlot(slotId)) {
-      reply.status(slotId === "main" ? 400 : 404);
-      return { message: slotId === "main" ? "main lane cannot cancel business work" : "slot 不存在" };
+    const { projectId, slotId: requestedSlotId } = request.params as { projectId: string; slotId: string };
+    const validatedSlot = await validateBusinessSlot(db, projectId, requestedSlotId, "main lane cannot cancel business work", reply);
+    if ("error" in validatedSlot) {
+      return validatedSlot.error;
     }
+    const slotId = validatedSlot.slotId;
 
     const input = (request.body ?? {}) as SlotCancelCurrentJobInput;
     if (!input.confirm) {
@@ -410,12 +415,13 @@ async function buildSlotProjection(
 ) {
   const project = await db.project.findUnique({
     where: { id: projectId },
-    select: { id: true, name: true }
+    select: { id: true, name: true, slotCount: true }
   });
   if (!project) {
     reply.status(404);
     return { message: "项目不存在" };
   }
+  const businessSlotIds = deriveSlotIds(project.slotCount);
 
   const [bindings, queueRows, degradedRows] = await Promise.all([
     db.slotBinding.findMany({
@@ -433,7 +439,7 @@ async function buildSlotProjection(
       where: {
         status: "pending",
         anchorId: {
-          in: ["slot-unassigned", ...SLOT_IDS]
+          in: ["slot-unassigned", ...businessSlotIds]
         }
       },
       orderBy: { queuedAt: "asc" }
@@ -443,7 +449,7 @@ async function buildSlotProjection(
         projectId,
         eventType: "slot_runtime_degraded",
         anchorId: {
-          in: [...SLOT_IDS]
+          in: [...businessSlotIds]
         }
       },
       orderBy: { emittedAt: "desc" }
@@ -469,7 +475,7 @@ async function buildSlotProjection(
       state: "available",
       canBindBusiness: false
     },
-    slots: SLOT_IDS.map((slotId) => {
+    slots: businessSlotIds.map((slotId) => {
       const binding = bindingsBySlot.get(slotId);
       return binding
         ? projectSlot(binding, binding.requirement, queueBySlot.get(slotId) ?? [], degradedBySlot.get(slotId) ?? null)
@@ -480,8 +486,30 @@ async function buildSlotProjection(
   };
 }
 
-function isBusinessSlot(value: string): value is SlotId {
-  return (SLOT_IDS as readonly string[]).includes(value);
+async function validateBusinessSlot(
+  db: PrismaClient,
+  projectId: string,
+  value: string,
+  mainMessage: string,
+  reply: FastifyReply
+): Promise<{ slotId: SlotId } | { error: { message: string } }> {
+  if (value === "main") {
+    reply.status(400);
+    return { error: { message: mainMessage } };
+  }
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: { slotCount: true }
+  });
+  if (!project) {
+    reply.status(404);
+    return { error: { message: "项目不存在" } };
+  }
+  if (!isSlotId(value, project.slotCount)) {
+    reply.status(404);
+    return { error: { message: "slot 不存在" } };
+  }
+  return { slotId: value };
 }
 
 function idleSlot(slotId: SlotId, queued: QueueProjection[]) {

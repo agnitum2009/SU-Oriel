@@ -55,6 +55,13 @@ interface WorkerConfig {
   sleep: (ms: number) => Promise<void>;
 }
 
+type DispatchProject = {
+  id: string;
+  localPath: string;
+  slotCount: number;
+  taskKey?: string | null;
+};
+
 const DEFAULT_POLL_INTERVAL_MS = 500;
 const DEFAULT_BATCH_SIZE = 20;
 
@@ -157,7 +164,14 @@ async function processAnchorDispatchRow(
 ): Promise<"submitted" | "failed"> {
   try {
     if (isSlotId(row.anchorId)) {
-      return await processSlotDispatchRow(config, row);
+      const project = await resolveProjectForDispatchSubject(config.prismaClient, row);
+      if (!project) {
+        throw new Error(`dispatch subject not found: ${row.subjectType}:${row.subjectId}`);
+      }
+      if (!isSlotId(row.anchorId, project.slotCount)) {
+        throw new Error(`slot ${row.anchorId} is outside project topology`);
+      }
+      return await processSlotDispatchRow(config, row, project);
     }
     const askInput = await buildAskInput(config.prismaClient, row);
     const anchor = await config.prismaClient.anchorAllocation.findUnique({
@@ -217,12 +231,9 @@ async function processAnchorDispatchRow(
 
 async function processSlotDispatchRow(
   config: WorkerConfig,
-  row: AnchorDispatchQueue
+  row: AnchorDispatchQueue,
+  project: DispatchProject
 ): Promise<"submitted" | "failed"> {
-  const project = await resolveProjectForDispatchSubject(config.prismaClient, row);
-  if (!project) {
-    throw new Error(`dispatch subject not found: ${row.subjectType}:${row.subjectId}`);
-  }
   const readiness = await config.waitForClaudeTuiReady(project.localPath);
   const readinessWarning = !readiness.ready;
   if (readinessWarning) {
@@ -332,13 +343,13 @@ async function buildAskInput(
 async function resolveProjectForDispatchSubject(
   db: PrismaClient,
   row: AnchorDispatchQueue
-): Promise<{ id: string; localPath: string; taskKey?: string | null } | null> {
+): Promise<DispatchProject | null> {
   if (row.subjectType === "requirement") {
     const requirement = await db.requirement.findUnique({
       where: { id: row.subjectId },
       select: {
         project: {
-          select: { id: true, localPath: true }
+          select: { id: true, localPath: true, slotCount: true }
         }
       }
     });
@@ -350,7 +361,7 @@ async function resolveProjectForDispatchSubject(
       select: {
         taskKey: true,
         project: {
-          select: { id: true, localPath: true }
+          select: { id: true, localPath: true, slotCount: true }
         }
       }
     });

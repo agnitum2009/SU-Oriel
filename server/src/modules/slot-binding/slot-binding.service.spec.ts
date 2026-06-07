@@ -8,6 +8,7 @@ import { beforeEach, test } from "vitest";
 import { prisma } from "../../db/prisma.js";
 import { JobSlotRouter } from "./job-slot-router.js";
 import {
+  isSlotId,
   reconcileCancelledRequirementProjection,
   SlotBindingService,
   updateSlotActivityForCapabilityOutcome
@@ -22,11 +23,12 @@ async function resetDatabase(): Promise<void> {
   await prisma.project.deleteMany();
 }
 
-async function createProjectWithRequirements(count: number) {
+async function createProjectWithRequirements(count: number, slotCount = 3) {
   const project = await prisma.project.create({
     data: {
       name: `slot-binding-${randomUUID()}`,
-      localPath: join(tmpdir(), `slot-binding-${randomUUID()}`)
+      localPath: join(tmpdir(), `slot-binding-${randomUUID()}`),
+      slotCount
     }
   });
   const requirements = [];
@@ -134,6 +136,35 @@ test("SlotBindingService queues the fourth active requirement without binding ma
   assert.equal(overflow, null);
   assert.equal(await prisma.slotBinding.count({ where: { projectId: project.id, slotId: "main" } }), 0);
   assert.equal(await prisma.slotBinding.count({ where: { projectId: project.id } }), 3);
+});
+
+test("isSlotId accepts supported topology bounds and rejects out-of-range values", () => {
+  assert.equal(isSlotId("slot-16"), true);
+  assert.equal(isSlotId("slot-17"), false);
+  assert.equal(isSlotId("slot-0"), false);
+  assert.equal(isSlotId("slot-x"), false);
+  assert.equal(isSlotId("main"), false);
+  assert.equal(isSlotId("slot-4", 3), false);
+  assert.equal(isSlotId("slot-4", 4), true);
+});
+
+test("SlotBindingService uses project slotCount when claiming the fourth requirement", async () => {
+  const { project, requirements } = await createProjectWithRequirements(4, 4);
+  const service = new SlotBindingService(prisma);
+
+  for (const requirement of requirements) {
+    await service.bindRequirement({
+      projectId: project.id,
+      requirementId: requirement.id
+    });
+  }
+
+  const bindings = await prisma.slotBinding.findMany({
+    where: { projectId: project.id },
+    orderBy: { slotId: "asc" }
+  });
+  assert.deepEqual(bindings.map((binding) => binding.slotId), ["slot-1", "slot-2", "slot-3", "slot-4"]);
+  assert.equal(bindings.find((binding) => binding.slotId === "slot-4")?.requirementId, requirements[3].id);
 });
 
 test("SlotBindingService explicit release drains then idles and emits slot_released", async () => {
@@ -357,6 +388,41 @@ test("reconcileCancelledRequirementProjection does not release busy slots before
   assert.equal(await prisma.eventJournal.count({ where: { eventType: "slot_released" } }), 0);
   const queued = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: "job-busy-reconcile" } });
   assert.equal(queued.status, "superseded");
+});
+
+test("reconcileCancelledRequirementProjection accepts slot-4 when project slotCount is 4", async () => {
+  const { project, requirements } = await createProjectWithRequirements(1, 4);
+  const requirement = await prisma.requirement.update({
+    where: { id: requirements[0].id },
+    data: { status: "cancelled" }
+  });
+  await prisma.slotBinding.create({
+    data: {
+      projectId: project.id,
+      slotId: "slot-4",
+      requirementId: requirement.id,
+      state: "bound",
+      boundAt: new Date("2026-06-06T10:00:00.000Z"),
+      lastActivityAt: new Date("2026-06-06T10:00:00.000Z")
+    }
+  });
+
+  const result = await reconcileCancelledRequirementProjection(prisma, {
+    projectId: project.id,
+    requirementId: requirement.id
+  });
+
+  assert.deepEqual(result.releasedSlotIds, ["slot-4"]);
+  const binding = await prisma.slotBinding.findUniqueOrThrow({
+    where: {
+      projectId_slotId: {
+        projectId: project.id,
+        slotId: "slot-4"
+      }
+    }
+  });
+  assert.equal(binding.state, "idle");
+  assert.equal(binding.requirementId, null);
 });
 
 test("updateSlotActivityForCapabilityOutcome releases a busy slot after requirement.cancel outcome is projected", async () => {
