@@ -25,7 +25,7 @@ import {
   type SlotId
 } from "../slot-topology/slot-topology.service.js";
 import type { SlotContextResetResult, SlotContextResetter } from "../slot-binding/slot-context-reset.service.js";
-import { SlotContextResetService } from "../slot-binding/slot-context-reset.service.js";
+import { createDefaultSlotContextResetter } from "../slot-binding/slot-context-reset.service.js";
 import type { CcbReloadResult } from "./reload-cli.js";
 import { runCcbReload } from "./reload-cli.js";
 
@@ -114,7 +114,7 @@ export class SlotResizeService {
     this.runtime = options.runtime ?? defaultSlotResizeRuntime();
     this.contextResetterFactory =
       options.contextResetterFactory ??
-      ((projectRoot) => new SlotContextResetService(new CcbdClientService({ projectRoot })));
+      (() => createDefaultSlotContextResetter());
   }
 
   async grow(projectId: string): Promise<SlotResizeResult> {

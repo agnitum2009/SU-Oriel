@@ -83,7 +83,7 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
   const projectRoot = options.projectRoot ?? "/repo/SU-CCB";
   const descriptor: SlotTerminalDescriptor = {
     slotId,
-    sessionName: "ccb-su-ccb-test-session",
+    sessionName: "ccb-realtime_translator-a8ae9ed1",
     panes: options.panes ?? [
       { role: "claude", target: "%7", paneIndex: 2 },
       { role: "codex", target: "%8", paneIndex: 3 }
@@ -91,7 +91,7 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
   };
   const agentGroupDescriptor: SlotTerminalDescriptor = {
     slotId: agentGroup,
-    sessionName: "ccb-su-ccb-test-session",
+    sessionName: "ccb-realtime_translator-a8ae9ed1",
     panes: [
       { role: "claude", target: "%1", paneIndex: 0 },
       { role: "codex", target: "%2", paneIndex: 1 }

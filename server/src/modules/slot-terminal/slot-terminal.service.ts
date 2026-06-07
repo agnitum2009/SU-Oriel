@@ -10,7 +10,6 @@ import { isSlotId, SlotBindingService } from "../slot-binding/slot-binding.servi
 import { SlotTerminalNotFoundError, SlotTerminalTargetForbiddenError } from "./slot-terminal.errors.js";
 
 const execFileAsync = promisify(execFile);
-const SESSION_PREFIX = "ccb-su-ccb-";
 const TMUX_SOCKET_RELATIVE_PATH = join(".ccb", "ccbd", "tmux.sock");
 const LIVE_BINDING_STATES = new Set(["bound", "busy", "unhealthy", "recovering"]);
 const AGENT_GROUP_WINDOWS = ["main"] as const;
@@ -156,17 +155,23 @@ export class TmuxSlotTerminalRuntimeResolver implements SlotTerminalRuntimeResol
     candidatesByRole: Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>;
   }> {
     const socketPath = buildSlotTerminalTmuxSocketPath(input.projectRoot);
-    const [sessionName, runtimeRecords] = await Promise.all([
-      this.resolveSessionName(socketPath),
+    const [listedPanes, runtimeRecords] = await Promise.all([
+      this.listAllPanes(socketPath),
       readRuntimeRecords(input.projectRoot)
     ]);
-    const listedPanes = await this.listPanes(socketPath, sessionName, input.slotId);
-    const paneById = new Map(listedPanes.map((pane) => [pane.paneId, pane]));
-    const candidatesByRole = collectRuntimePaneCandidatesByRole(runtimeRecords, input.slotId, sessionName, paneById);
+    const paneById = indexListedPanesById(listedPanes);
+    const candidates = collectRuntimePaneCandidates(runtimeRecords, input.slotId, paneById);
+    const sessionNames = new Set(candidates.map((candidate) => candidate.sessionName));
 
-    if ([...candidatesByRole.values()].every((candidates) => candidates.length === 0)) {
+    if (sessionNames.size === 0) {
       throw new SlotTerminalNotFoundError("slot terminal panes not found");
     }
+    if (sessionNames.size !== 1) {
+      throw new SlotTerminalNotFoundError("slot terminal panes are not uniquely resolvable");
+    }
+
+    const sessionName = [...sessionNames][0] ?? "";
+    const candidatesByRole = groupPaneCandidatesByRole(candidates);
 
     return {
       sessionName,
@@ -174,54 +179,27 @@ export class TmuxSlotTerminalRuntimeResolver implements SlotTerminalRuntimeResol
     };
   }
 
-  private async resolveSessionName(socketPath: string): Promise<string> {
-    let stdout = "";
-    try {
-      const result = await this.execFileProcess(this.tmuxCommand, [
-        "-S",
-        socketPath,
-        "list-sessions",
-        "-F",
-        "#{session_name}"
-      ]);
-      stdout = result.stdout;
-    } catch {
-      throw new SlotTerminalNotFoundError("slot tmux session not found");
-    }
-
-    const sessionName = stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.startsWith(SESSION_PREFIX));
-    if (!sessionName) {
-      throw new SlotTerminalNotFoundError("slot tmux session not found");
-    }
-    return sessionName;
-  }
-
-  private async listPanes(socketPath: string, sessionName: string, slotId: string): Promise<ListedPane[]> {
+  private async listAllPanes(socketPath: string): Promise<ListedPane[]> {
     let stdout = "";
     try {
       const result = await this.execFileProcess(this.tmuxCommand, [
         "-S",
         socketPath,
         "list-panes",
-        "-t",
-        `${sessionName}:${slotId}`,
+        "-a",
         "-F",
         "#{session_name}\t#{window_name}\t#{pane_id}\t#{pane_index}"
       ]);
       stdout = result.stdout;
     } catch {
-      throw new SlotTerminalNotFoundError("slot tmux window not found");
+      throw new SlotTerminalNotFoundError("slot terminal panes not found");
     }
 
     return stdout
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
-      .map(parsePaneLine)
-      .filter((pane) => pane.windowName === slotId);
+      .map(parsePaneLine);
   }
 }
 
@@ -400,13 +378,16 @@ async function readRuntimeRecords(projectRoot: string): Promise<RuntimeRecordEnt
   return records;
 }
 
-function collectRuntimePaneCandidatesByRole(
+type RuntimePaneCandidateWithSession = SlotTerminalPaneCandidate & {
+  sessionName: string;
+};
+
+function collectRuntimePaneCandidates(
   records: RuntimeRecordEntry[],
   slotId: string,
-  sessionName: string,
   paneById: Map<string, ListedPane>
-): Map<SlotTerminalRole, SlotTerminalPaneCandidate[]> {
-  const candidatesByRole = new Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>();
+): RuntimePaneCandidateWithSession[] {
+  const candidates: RuntimePaneCandidateWithSession[] = [];
 
   for (const { agentName, record } of records) {
     const role = normalizeRuntimeRole(record.provider);
@@ -420,22 +401,53 @@ function collectRuntimePaneCandidatesByRole(
     }
 
     const pane = paneById.get(paneId);
-    if (!pane || pane.windowName !== slotId || pane.sessionName !== sessionName) {
+    if (!pane || pane.windowName !== slotId || !normalizeString(pane.sessionName)) {
       continue;
     }
 
-    candidatesByRole.set(role, [
-      ...(candidatesByRole.get(role) ?? []),
+    candidates.push({
+      sessionName: pane.sessionName,
+      role,
+      target: pane.paneId,
+      paneIndex: pane.paneIndex,
+      agentName
+    });
+  }
+
+  return candidates;
+}
+
+function groupPaneCandidatesByRole(
+  candidates: RuntimePaneCandidateWithSession[]
+): Map<SlotTerminalRole, SlotTerminalPaneCandidate[]> {
+  const candidatesByRole = new Map<SlotTerminalRole, SlotTerminalPaneCandidate[]>();
+
+  for (const candidate of candidates) {
+    candidatesByRole.set(candidate.role, [
+      ...(candidatesByRole.get(candidate.role) ?? []),
       {
-        role,
-        target: pane.paneId,
-        paneIndex: pane.paneIndex,
-        agentName
+        role: candidate.role,
+        target: candidate.target,
+        paneIndex: candidate.paneIndex,
+        agentName: candidate.agentName
       }
     ]);
   }
-
   return candidatesByRole;
+}
+
+function indexListedPanesById(listedPanes: ListedPane[]): Map<string, ListedPane> {
+  const paneById = new Map<string, ListedPane>();
+  for (const pane of listedPanes) {
+    if (!pane.paneId) {
+      continue;
+    }
+    if (paneById.has(pane.paneId)) {
+      throw new SlotTerminalNotFoundError("slot terminal panes are not uniquely resolvable");
+    }
+    paneById.set(pane.paneId, pane);
+  }
+  return paneById;
 }
 
 function strictAgentGroupPanes(

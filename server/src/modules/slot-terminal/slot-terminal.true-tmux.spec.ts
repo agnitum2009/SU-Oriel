@@ -21,6 +21,7 @@ import {
   type SlotTerminalStreamModeEvent,
   type SlotTerminalStreamTmuxBackend
 } from "./slot-terminal-stream-recorder.js";
+import { TmuxSlotTerminalRuntimeResolver } from "./slot-terminal.service.js";
 import type {
   SlotTerminalBinding,
   SlotTerminalDescriptor,
@@ -38,7 +39,7 @@ const RECONCILED_TAIL_LINES = 2_000;
 
 class TrueTmuxHarness {
   readonly sessionName =
-    "slot_terminal_true_" + process.pid + "_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+    "ccb-realtime_translator-" + process.pid + "-" + Date.now() + "-" + Math.random().toString(36).slice(2);
   readonly socketPath: string;
   paneId = "";
 
@@ -61,7 +62,8 @@ class TrueTmuxHarness {
       "30",
       "bash -lc 'stty -echo; while IFS= read -r line; do printf \"%s\\n\" \"$line\"; done'"
     ]);
-    await harness.tmux(["set-option", "-w", "-t", harness.sessionName + ":0", "history-limit", "6000"]);
+    await harness.tmux(["set-option", "-w", "-t", harness.sessionName, "history-limit", "6000"]);
+    await harness.tmux(["rename-window", "-t", harness.sessionName, "slot-1"]);
     harness.paneId = await harness.resolvePaneId();
     return harness;
   }
@@ -163,7 +165,8 @@ class RecordingTmuxBackend implements SlotTerminalStreamTmuxBackend {
 class FakeSlotTerminalStore implements SlotTerminalStore {
   constructor(
     private readonly projectRoot: string,
-    private readonly pane: SlotTerminalPaneTarget
+    private readonly pane: SlotTerminalPaneTarget,
+    private readonly sessionName: string
   ) {}
 
   async findProject(projectId: string): Promise<SlotTerminalProject | null> {
@@ -181,7 +184,7 @@ class FakeSlotTerminalStore implements SlotTerminalStore {
   descriptor(): SlotTerminalDescriptor {
     return {
       slotId: "slot-1",
-      sessionName: "slot-terminal-true-tmux",
+      sessionName: this.sessionName,
       panes: [this.pane]
     };
   }
@@ -192,7 +195,7 @@ function buildTrueTmuxWebSocketApp(input: {
   streamRecorder: SlotTerminalStreamRecorderRegistry;
 }) {
   const pane: SlotTerminalPaneTarget = { role: "claude", target: input.harness.paneId, paneIndex: 0 };
-  const store = new FakeSlotTerminalStore(input.harness.projectRoot, pane);
+  const store = new FakeSlotTerminalStore(input.harness.projectRoot, pane, input.harness.sessionName);
   const descriptor = store.descriptor();
   const service = {
     resolveRequirementTerminal: async () => descriptor,
@@ -214,7 +217,35 @@ function buildTrueTmuxWebSocketApp(input: {
   return app;
 }
 
+async function writeRuntime(projectRoot: string, agentName: string, record: Record<string, unknown>): Promise<void> {
+  const agentDir = join(projectRoot, ".ccb", "agents", agentName);
+  await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, "runtime.json"), JSON.stringify(record, null, 2), "utf8");
+}
+
 describe("slot-terminal true tmux integration", () => {
+  itWithTmux("resolves runtime pane metadata from a non-SU-CCB tmux session", async () => {
+    await withHarness(async (harness) => {
+      await writeRuntime(harness.projectRoot, "slot1_claude", {
+        agent_name: "slot1_claude",
+        provider: "claude",
+        tmux_window_name: "slot-1",
+        pane_id: harness.paneId
+      });
+      const resolver = new TmuxSlotTerminalRuntimeResolver();
+
+      const resolved = await resolver.resolveSlotPanes({
+        projectRoot: harness.projectRoot,
+        slotId: "slot-1"
+      });
+
+      expect(resolved.sessionName).toBe(harness.sessionName);
+      expect(resolved.panes).toHaveLength(1);
+      expect(resolved.panes[0]).toMatchObject({ role: "claude", target: harness.paneId });
+      expect(Number.isInteger(resolved.panes[0]?.paneIndex)).toBe(true);
+    });
+  }, 15_000);
+
   itWithTmux("streams all lines emitted after connection from a real tmux pane", async () => {
     await withHarness(async (harness) => {
       const registry = new SlotTerminalStreamRecorderRegistry();

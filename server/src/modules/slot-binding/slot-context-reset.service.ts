@@ -1,6 +1,11 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { realpath } from "node:fs/promises";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 
+import type { PrismaClient } from "@prisma/client";
+
+import { prisma } from "../../db/prisma.js";
 import type { CcbdClientServiceLike, CcbdProjectView } from "../ccbd-client/ccbd-client.types.js";
 import { CcbdClientService } from "../ccbd-client/ccbd-client.service.js";
 import type { SlotId } from "./slot-binding.service.js";
@@ -43,24 +48,87 @@ export type SlotContextResetter = {
 };
 
 type TmuxCommandRunner = (socketPath: string, args: string[]) => Promise<void>;
+type SlotContextResetClient = Pick<CcbdClientServiceLike, "projectView">;
+
+export interface SlotContextResetStore {
+  findProjectLocalPath(projectId: string): Promise<string | null>;
+}
+
+export type SlotContextResetClientFactory = (projectRoot: string) => SlotContextResetClient;
+
+export type SlotContextResetServiceOptions = {
+  store?: SlotContextResetStore;
+  clientFactory?: SlotContextResetClientFactory;
+  runTmux?: TmuxCommandRunner;
+};
+
+export class PrismaSlotContextResetStore implements SlotContextResetStore {
+  constructor(private readonly client: PrismaClient = prisma) {}
+
+  async findProjectLocalPath(projectId: string): Promise<string | null> {
+    const project = await this.client.project.findUnique({
+      where: { id: projectId },
+      select: { localPath: true }
+    });
+    return project?.localPath ?? null;
+  }
+}
 
 export class SlotContextResetService implements SlotContextResetter {
-  constructor(
-    private readonly client: Pick<CcbdClientServiceLike, "projectView"> = new CcbdClientService(),
-    private readonly options: { runTmux?: TmuxCommandRunner } = {}
-  ) {}
+  private readonly store: SlotContextResetStore;
+  private readonly clientFactory: SlotContextResetClientFactory;
+  private readonly runTmuxRunner?: TmuxCommandRunner;
+
+  constructor(options: SlotContextResetServiceOptions = {}) {
+    this.store = options.store ?? new PrismaSlotContextResetStore();
+    this.clientFactory = options.clientFactory ?? ((projectRoot) => new CcbdClientService({ projectRoot }));
+    this.runTmuxRunner = options.runTmux;
+  }
 
   async resetSlotContext(input: SlotContextResetInput): Promise<SlotContextResetResult> {
     const command = input.command ?? SLOT_CONTEXT_RESET_COMMAND;
+    let localPath: string | null;
+    try {
+      localPath = normalizeString(await this.store.findProjectLocalPath(input.projectId));
+    } catch (error) {
+      return buildResult(input, command, [], [
+        {
+          agent: "*",
+          status: "failed",
+          reason: `project_local_path_lookup_failed: ${errorMessage(error)}`
+        }
+      ]);
+    }
+    if (!localPath) {
+      return buildResult(input, command, [], [
+        {
+          agent: "*",
+          status: "failed",
+          reason: "project_local_path_missing"
+        }
+      ]);
+    }
+
+    const client = this.clientFactory(localPath);
     let view: CcbdProjectView;
     try {
-      view = await this.client.projectView();
+      view = await client.projectView();
     } catch (error) {
       return buildResult(input, command, [], [
         {
           agent: "*",
           status: "failed",
           reason: `project_view_failed: ${errorMessage(error)}`
+        }
+      ]);
+    }
+    const viewProjectRoot = normalizeString(view.project?.root);
+    if (!viewProjectRoot || !(await sameCanonicalPath(viewProjectRoot, localPath))) {
+      return buildResult(input, command, [], [
+        {
+          agent: "*",
+          status: "failed",
+          reason: "project_root_mismatch"
         }
       ]);
     }
@@ -131,7 +199,7 @@ export class SlotContextResetService implements SlotContextResetter {
   }
 
   private async runTmux(socketPath: string, args: string[]): Promise<void> {
-    const runner = this.options.runTmux ?? defaultTmuxRunner;
+    const runner = this.runTmuxRunner ?? defaultTmuxRunner;
     await runner(socketPath, args);
   }
 }
@@ -212,6 +280,26 @@ function normalizeString(value: unknown): string {
 function normalizePaneId(value: unknown): string | null {
   const text = normalizeString(value);
   return text.startsWith("%") ? text : null;
+}
+
+async function sameCanonicalPath(left: string, right: string): Promise<boolean> {
+  return (await canonicalPath(left)) === (await canonicalPath(right));
+}
+
+async function canonicalPath(value: string): Promise<string> {
+  const absolute = resolve(value);
+  let canonical = absolute;
+  try {
+    canonical = await realpath(absolute);
+  } catch {
+    canonical = absolute;
+  }
+  return stripTrailingSlash(canonical.replace(/\\/g, "/"));
+}
+
+function stripTrailingSlash(value: string): string {
+  const stripped = value.replace(/\/+$/, "");
+  return stripped || "/";
 }
 
 function errorMessage(error: unknown): string {

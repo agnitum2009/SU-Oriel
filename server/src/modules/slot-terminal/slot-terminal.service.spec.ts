@@ -48,6 +48,15 @@ type FixtureOptions = {
   slotCount?: number;
   bindingState?: SlotTerminalBinding["state"];
   includeBinding?: boolean;
+  sessionName?: string;
+  panes?: TmuxPaneFixture[];
+};
+
+type TmuxPaneFixture = {
+  sessionName?: string;
+  windowName: string;
+  paneId: string;
+  paneIndex: number;
 };
 
 async function createFixture(options: FixtureOptions = {}) {
@@ -85,10 +94,11 @@ async function createFixture(options: FixtureOptions = {}) {
     new Map([[requirementId, projectId]]),
     options.includeBinding === false ? [] : [binding]
   );
+  const sessionName = options.sessionName ?? "ccb-realtime_translator-a8ae9ed1";
   const execFile = createTmuxExecFile({
-    sessionName: "ccb-su-ccb-test-session",
+    sessionName,
     slotId,
-    panes: [
+    panes: options.panes ?? [
       { windowName: slotId, paneId: "%9", paneIndex: 0 },
       { windowName: slotId, paneId: "%8", paneIndex: 3 },
       { windowName: slotId, paneId: "%7", paneIndex: 2 }
@@ -97,7 +107,7 @@ async function createFixture(options: FixtureOptions = {}) {
   const runtime = new TmuxSlotTerminalRuntimeResolver({ execFileProcess: execFile });
   const service = new SlotTerminalService({ store, runtime });
 
-  return { projectId, requirementId, slotId, service, execFile };
+  return { projectId, requirementId, slotId, sessionName, service, execFile };
 }
 
 test("GET slot-terminal returns bound claude/codex tmux targets only", async () => {
@@ -114,7 +124,7 @@ test("GET slot-terminal returns bound claude/codex tmux targets only", async () 
     assert.equal(response.statusCode, 200, response.body);
     assert.deepEqual(response.json(), {
       slotId: fixture.slotId,
-      sessionName: "ccb-su-ccb-test-session",
+      sessionName: fixture.sessionName,
       panes: [
         { role: "claude", target: "%7", paneIndex: 2 },
         { role: "codex", target: "%8", paneIndex: 3 }
@@ -158,8 +168,11 @@ test("pane role resolution uses runtime window and provider metadata, not pane t
   ]);
   const listPanesCall = fixture.execFile.mock.calls.find(([, args]) => args.includes("list-panes"));
   assert.ok(listPanesCall);
+  assert.equal(listPanesCall[1].includes("-a"), true);
+  assert.equal(listPanesCall[1].includes("-t"), false);
   assert.equal(listPanesCall[1].some((arg) => arg.includes("pane_title")), false);
   assert.equal(listPanesCall[1].some((arg) => arg.includes("pane_current_command")), false);
+  assert.equal(fixture.execFile.mock.calls.some(([, args]) => args.includes("list-sessions")), false);
 });
 
 test("resolveRequirementTerminal accepts slot-4 when the project topology has four slots", async () => {
@@ -175,6 +188,78 @@ test("resolveRequirementTerminal accepts slot-4 when the project topology has fo
     { role: "claude", target: "%7", paneIndex: 2 },
     { role: "codex", target: "%8", paneIndex: 3 }
   ]);
+});
+
+test("resolveRequirementTerminal ignores residual sessions without runtime pane matches", async () => {
+  const fixture = await createFixture({
+    panes: [
+      { sessionName: "ccb-stale-project-deadbeef", windowName: "slot-2", paneId: "%88", paneIndex: 0 },
+      { windowName: "slot-2", paneId: "%8", paneIndex: 3 },
+      { windowName: "slot-2", paneId: "%7", paneIndex: 2 }
+    ]
+  });
+
+  const descriptor = await fixture.service.resolveRequirementTerminal({
+    projectId: fixture.projectId,
+    requirementId: fixture.requirementId
+  });
+
+  assert.equal(descriptor.sessionName, fixture.sessionName);
+  assert.deepEqual(descriptor.panes, [
+    { role: "claude", target: "%7", paneIndex: 2 },
+    { role: "codex", target: "%8", paneIndex: 3 }
+  ]);
+});
+
+test("resolveRequirementTerminal fails loud when runtime panes resolve to multiple sessions", async () => {
+  const fixture = await createFixture({
+    panes: [
+      { sessionName: "ccb-realtime_translator-a8ae9ed1", windowName: "slot-2", paneId: "%7", paneIndex: 2 },
+      { sessionName: "ccb-other-project-baddata", windowName: "slot-2", paneId: "%8", paneIndex: 3 }
+    ]
+  });
+
+  await assert.rejects(
+    () =>
+      fixture.service.resolveRequirementTerminal({
+        projectId: fixture.projectId,
+        requirementId: fixture.requirementId
+      }),
+    /not uniquely resolvable/
+  );
+});
+
+test("resolveRequirementTerminal fails loud when tmux reports duplicate pane ids", async () => {
+  const fixture = await createFixture({
+    panes: [
+      { windowName: "slot-2", paneId: "%7", paneIndex: 2 },
+      { windowName: "slot-2", paneId: "%7", paneIndex: 3 }
+    ]
+  });
+
+  await assert.rejects(
+    () =>
+      fixture.service.resolveRequirementTerminal({
+        projectId: fixture.projectId,
+        requirementId: fixture.requirementId
+      }),
+    /not uniquely resolvable/
+  );
+});
+
+test("resolveRequirementTerminal returns NotFound when no runtime pane intersects tmux panes", async () => {
+  const fixture = await createFixture({
+    panes: [{ windowName: "slot-2", paneId: "%42", paneIndex: 0 }]
+  });
+
+  await assert.rejects(
+    () =>
+      fixture.service.resolveRequirementTerminal({
+        projectId: fixture.projectId,
+        requirementId: fixture.requirementId
+      }),
+    SlotTerminalNotFoundError
+  );
 });
 
 test("assertTargetBelongsTo rejects cross-slot, cross-project, cross-pane, and non-whitelist role targets", async () => {
@@ -216,7 +301,7 @@ test("GET agent-terminal main returns strict claude/codex tmux targets", async (
     assert.equal(response.statusCode, 200, response.body);
     assert.deepEqual(response.json(), {
       slotId: "main",
-      sessionName: "ccb-su-ccb-test-session",
+      sessionName: fixture.sessionName,
       panes: [
         { role: "claude", target: "%1", paneIndex: 1 },
         { role: "codex", target: "%2", paneIndex: 2 }
@@ -319,17 +404,18 @@ async function writeRuntime(projectRoot: string, agentName: string, record: Reco
 function createTmuxExecFile(input: {
   sessionName: string;
   slotId: string;
-  panes: Array<{ windowName: string; paneId: string; paneIndex: number }>;
+  panes: TmuxPaneFixture[];
 }) {
   return vi.fn<SlotTerminalExecFileProcess>(async (_command, args) => {
     if (args.includes("list-sessions")) {
-      return { stdout: `other-session\n${input.sessionName}\n`, stderr: "" };
+      throw new Error("unexpected list-sessions call");
     }
     if (args.includes("list-panes")) {
-      assert.equal(args[args.indexOf("-t") + 1], `${input.sessionName}:${input.slotId}`);
+      assert.equal(args.includes("-a"), true);
+      assert.equal(args.includes("-t"), false);
       return {
         stdout: input.panes
-          .map((pane) => `${input.sessionName}\t${pane.windowName}\t${pane.paneId}\t${pane.paneIndex}`)
+          .map((pane) => `${pane.sessionName ?? input.sessionName}\t${pane.windowName}\t${pane.paneId}\t${pane.paneIndex}`)
           .join("\n"),
         stderr: ""
       };
@@ -346,10 +432,11 @@ type AgentGroupRuntimeFixture = {
 
 async function createAgentGroupFixture(options: {
   runtimes?: AgentGroupRuntimeFixture[];
-  panes?: Array<{ windowName: string; paneId: string; paneIndex: number }>;
+  panes?: TmuxPaneFixture[];
 } = {}) {
   const projectId = `project-${randomUUID()}`;
   const projectRoot = join(tmpdir(), `slot-terminal-main-${randomUUID()}`);
+  const sessionName = "ccb-realtime_translator-a8ae9ed1";
   const runtimes = options.runtimes ?? [
     { agentName: "main_claude", provider: "claude", paneId: "%1" },
     { agentName: "main_codex", provider: "codex", paneId: "%2" }
@@ -376,7 +463,7 @@ async function createAgentGroupFixture(options: {
     []
   );
   const execFile = createTmuxExecFile({
-    sessionName: "ccb-su-ccb-test-session",
+    sessionName,
     slotId: "main",
     panes:
       options.panes ?? [
@@ -388,5 +475,5 @@ async function createAgentGroupFixture(options: {
   const runtime = new TmuxSlotTerminalRuntimeResolver({ execFileProcess: execFile });
   const service = new SlotTerminalService({ store, runtime });
 
-  return { projectId, service, execFile };
+  return { projectId, sessionName, service, execFile };
 }
