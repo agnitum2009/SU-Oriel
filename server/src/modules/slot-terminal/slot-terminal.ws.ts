@@ -21,8 +21,10 @@ import {
   SLOT_TERMINAL_ACTIVE_FRAME_INTERVAL_MS,
   SLOT_TERMINAL_IDLE_FRAME_INTERVAL_MS,
   SlotTerminalFramePump,
+  inferFrameDimensions,
   TmuxSlotTerminalFrameCapture,
   type SlotTerminalFrameCaptureBackend,
+  type SlotTerminalPaneDimensions,
   type SlotTerminalPollingHint,
   type SlotTerminalVisibility
 } from "./slot-terminal.frame-stream.js";
@@ -32,8 +34,16 @@ import {
   type SlotTerminalInputAuditSink,
   type SlotTerminalInputWriterBackend
 } from "./slot-terminal.input.js";
+import {
+  SlotTerminalStreamRecorderRegistry,
+  type SlotTerminalStreamChunk,
+  type SlotTerminalStreamMode,
+  type SlotTerminalStreamSubscription
+} from "./slot-terminal-stream-recorder.js";
 
 export const SLOT_TERMINAL_INPUT_MAX_BYTES = 64 * 1024;
+
+type SlotTerminalStreamRecorderDependency = Pick<SlotTerminalStreamRecorderRegistry, "subscribe">;
 
 export type SlotTerminalWebSocketService = Pick<
   SlotTerminalService,
@@ -50,6 +60,7 @@ export type SlotTerminalWebSocketDependencies = {
   capture?: SlotTerminalFrameCaptureBackend;
   inputWriter?: SlotTerminalInputWriterBackend;
   auditSink?: SlotTerminalInputAuditSink;
+  streamRecorder?: SlotTerminalStreamRecorderDependency | null;
   activeIntervalMs?: number;
   idleIntervalMs?: number;
   allowedOrigins?: string[];
@@ -96,6 +107,8 @@ export async function registerSlotTerminalWebSocketRoutes(
   const capture = dependencies.capture ?? new TmuxSlotTerminalFrameCapture();
   const inputWriter = dependencies.inputWriter ?? new TmuxSlotTerminalInputWriter();
   const auditSink = dependencies.auditSink ?? new SlotTerminalInputAuditWriter();
+  const streamRecorder =
+    dependencies.streamRecorder === undefined ? new SlotTerminalStreamRecorderRegistry() : dependencies.streamRecorder;
   const activeIntervalMs = dependencies.activeIntervalMs ?? SLOT_TERMINAL_ACTIVE_FRAME_INTERVAL_MS;
   const idleIntervalMs = dependencies.idleIntervalMs ?? SLOT_TERMINAL_IDLE_FRAME_INTERVAL_MS;
   const allowedOrigins = dependencies.allowedOrigins ?? getDefaultAllowedOrigins();
@@ -107,6 +120,7 @@ export async function registerSlotTerminalWebSocketRoutes(
     capture,
     inputWriter,
     auditSink,
+    streamRecorder,
     activeIntervalMs,
     idleIntervalMs,
     inputMaxBytes
@@ -188,6 +202,7 @@ function handleSlotTerminalWebSocketConnection(input: {
   capture: SlotTerminalFrameCaptureBackend;
   inputWriter: SlotTerminalInputWriterBackend;
   auditSink: SlotTerminalInputAuditSink;
+  streamRecorder: SlotTerminalStreamRecorderDependency | null;
   activeIntervalMs: number;
   idleIntervalMs: number;
   inputMaxBytes: number;
@@ -195,16 +210,19 @@ function handleSlotTerminalWebSocketConnection(input: {
   role: SlotTerminalRole;
 }): void {
   let pump: SlotTerminalFramePump | null = null;
+  let streamSubscription: SlotTerminalStreamSubscription | null = null;
   let subscription: SlotTerminalSubscription | null = null;
+  let currentHint: SlotTerminalPollingHint | null = null;
   let pendingHint: SlotTerminalPollingHint | null = null;
   let inputQueue = Promise.resolve();
   let closed = false;
-  const closePump = () => {
+  const closeConnection = () => {
     if (closed) {
       return;
     }
     closed = true;
     pump?.stop();
+    void streamSubscription?.release();
   };
 
   void (async () => {
@@ -221,32 +239,6 @@ function handleSlotTerminalWebSocketConnection(input: {
         return;
       }
 
-      pump = new SlotTerminalFramePump({
-        capture: input.capture,
-        target: resolvedSubscription.target,
-        socketPath: resolvedSubscription.socketPath,
-        activeIntervalMs: input.activeIntervalMs,
-        idleIntervalMs: input.idleIntervalMs,
-        onFrame: (frame) => {
-          sendJson(input.socket, {
-            type: "frame",
-            data: frame.data,
-            cols: frame.cols,
-            rows: frame.rows,
-            generation: frame.generation,
-            initial: frame.initial
-          });
-        },
-        onError: (error) => {
-          sendErrorAndClose(input.socket, "CAPTURE_FAILED", errorMessage(error), 1011);
-        }
-      });
-
-      if (pendingHint) {
-        pump.configureHint(pendingHint);
-        pendingHint = null;
-      }
-
       sendJson(input.socket, {
         type: "ready",
         descriptor: buildReadyDescriptor({
@@ -256,7 +248,44 @@ function handleSlotTerminalWebSocketConnection(input: {
           idleIntervalMs: input.idleIntervalMs
         })
       });
-      await pump.start();
+      if (input.streamRecorder) {
+        streamSubscription = await startSlotTerminalStreamMode({
+          capture: input.capture,
+          streamRecorder: input.streamRecorder,
+          socket: input.socket,
+          subscription: resolvedSubscription,
+          activeIntervalMs: input.activeIntervalMs,
+          idleIntervalMs: input.idleIntervalMs,
+          pendingHint,
+          getCurrentHint: () => currentHint,
+          isClosed: () => closed,
+          setPump: (nextPump) => {
+            pump?.stop();
+            pump = nextPump;
+          },
+          setStreamSubscription: (nextSubscription) => {
+            streamSubscription = nextSubscription;
+          }
+        });
+        pendingHint = null;
+      } else {
+        pump = createSlotTerminalSnapshotPump({
+          capture: input.capture,
+          socket: input.socket,
+          subscription: resolvedSubscription,
+          activeIntervalMs: input.activeIntervalMs,
+          idleIntervalMs: input.idleIntervalMs,
+          mode: undefined,
+          onError: (error) => {
+            sendErrorAndClose(input.socket, "CAPTURE_FAILED", errorMessage(error), 1011);
+          }
+        });
+        if (pendingHint) {
+          pump.configureHint(pendingHint);
+          pendingHint = null;
+        }
+        await pump.start();
+      }
     } catch (error) {
       sendErrorAndClose(input.socket, errorCode(error), errorMessage(error), closeCode(error));
     }
@@ -267,17 +296,18 @@ function handleSlotTerminalWebSocketConnection(input: {
     if (action.type === "send") {
       sendJson(input.socket, action.payload);
     } else if (action.type === "close") {
-      closePump();
+      closeConnection();
       try {
         input.socket.close(1000, "client requested close");
       } catch {
         // ignore
       }
     } else if (action.type === "hint") {
-      if (pump) {
-        void applySlotTerminalHint(pump, action);
+      currentHint = mergeSlotTerminalHint(currentHint, action);
+      if (pump || streamSubscription) {
+        void applySlotTerminalConnectionHint({ pump, streamSubscription }, action);
       } else {
-        pendingHint = mergeSlotTerminalHint(pendingHint, action);
+        pendingHint = currentHint;
       }
     } else if (action.type === "input" || action.type === "paste") {
       const activeSubscription = subscription;
@@ -307,7 +337,233 @@ function handleSlotTerminalWebSocketConnection(input: {
     }
   });
 
-  input.socket.on("close", closePump);
+  input.socket.on("close", closeConnection);
+}
+
+async function startSlotTerminalStreamMode(input: {
+  capture: SlotTerminalFrameCaptureBackend;
+  streamRecorder: SlotTerminalStreamRecorderDependency;
+  socket: { send: (data: string) => void; close: (code?: number, reason?: string) => void };
+  subscription: SlotTerminalSubscription;
+  activeIntervalMs: number;
+  idleIntervalMs: number;
+  pendingHint: SlotTerminalPollingHint | null;
+  getCurrentHint: () => SlotTerminalPollingHint | null;
+  isClosed: () => boolean;
+  setPump: (pump: SlotTerminalFramePump | null) => void;
+  setStreamSubscription: (subscription: SlotTerminalStreamSubscription | null) => void;
+}): Promise<SlotTerminalStreamSubscription | null> {
+  let mode = "stream" as SlotTerminalStreamMode;
+  let initialSnapshotSent = false;
+  let fallbackStarted = false;
+  let generation = 0;
+  let lastDimensions: SlotTerminalPaneDimensions | null = null;
+  let bufferedChunks: SlotTerminalStreamChunk[] = [];
+  let streamQueue = Promise.resolve();
+  let streamSubscription: SlotTerminalStreamSubscription | null = null;
+
+  const targetInput = {
+    target: input.subscription.target,
+    socketPath: input.subscription.socketPath
+  };
+  const sendFrame = (payload: unknown) => {
+    if (!input.isClosed()) {
+      sendJson(input.socket, payload);
+    }
+  };
+  const ensureFallbackPumpStarted = () => {
+    if (fallbackStarted || input.isClosed()) {
+      return;
+    }
+    const pump = createSlotTerminalSnapshotPump({
+      capture: input.capture,
+      socket: input.socket,
+      subscription: input.subscription,
+      activeIntervalMs: input.activeIntervalMs,
+      idleIntervalMs: input.idleIntervalMs,
+      mode: "snapshot-fallback",
+      onError: (error) => {
+        sendErrorAndClose(input.socket, "CAPTURE_FAILED", errorMessage(error), 1011);
+      }
+    });
+    const currentHint = input.getCurrentHint();
+    if (currentHint) {
+      pump.configureHint(currentHint);
+    }
+    input.setPump(pump);
+    fallbackStarted = true;
+    void pump.start();
+  };
+  const captureStructuralFrame = async (initial: boolean) => {
+    const data = await input.capture.capturePane({ ...targetInput, initial });
+    const dimensions = (await input.capture.getPaneDimensions?.(targetInput)) ?? inferFrameDimensions(data);
+    lastDimensions = dimensions;
+    return {
+      data,
+      cols: dimensions.cols,
+      rows: dimensions.rows,
+      generation: ++generation
+    };
+  };
+  const sendReset = async (reason: "resize" | "gap" | "error" | "reconcile") => {
+    const frame = await captureStructuralFrame(true);
+    sendFrame({
+      type: "frame",
+      kind: "reset",
+      reason,
+      ...frame,
+      initial: true,
+      mode
+    });
+  };
+  const checkResizeAndReset = async (): Promise<boolean> => {
+    if (!lastDimensions || !input.capture.getPaneDimensions) {
+      return false;
+    }
+    const dimensions = await input.capture.getPaneDimensions(targetInput);
+    if (dimensions.cols === lastDimensions.cols && dimensions.rows === lastDimensions.rows) {
+      return false;
+    }
+    lastDimensions = dimensions;
+    await sendReset("resize");
+    return true;
+  };
+  const enqueueReset = (reason: "resize" | "gap" | "error" | "reconcile") => {
+    streamQueue = streamQueue
+      .then(async () => {
+        if (!input.isClosed()) {
+          await sendReset(reason);
+        }
+      })
+      .catch(() => {
+        mode = "snapshot-fallback";
+        ensureFallbackPumpStarted();
+      });
+  };
+  const enqueueStreamChunk = (chunk: SlotTerminalStreamChunk) => {
+    streamQueue = streamQueue
+      .then(async () => {
+        if (input.isClosed() || mode !== "stream") {
+          return;
+        }
+        const resized = await checkResizeAndReset();
+        if (resized) {
+          return;
+        }
+        sendFrame({
+          type: "frame",
+          kind: "stream",
+          data: chunk.data,
+          seq: chunk.seq,
+          mode: "stream"
+        });
+      })
+      .catch(() => {
+        mode = "snapshot-fallback";
+        ensureFallbackPumpStarted();
+      });
+  };
+
+  streamSubscription = await input.streamRecorder.subscribe({
+    target: input.subscription.target,
+    socketPath: input.subscription.socketPath,
+    callbacks: {
+      onChunk: (chunk) => {
+        if (!initialSnapshotSent) {
+          bufferedChunks.push(chunk);
+          return;
+        }
+        enqueueStreamChunk(chunk);
+      },
+      onGap: () => {
+        if (!initialSnapshotSent) {
+          return;
+        }
+        enqueueReset("gap");
+      },
+      onMode: (event) => {
+        mode = event.mode;
+        if (event.mode === "snapshot-fallback") {
+          bufferedChunks = [];
+          if (initialSnapshotSent) {
+            ensureFallbackPumpStarted();
+          }
+          return;
+        }
+        fallbackStarted = false;
+        input.setPump(null);
+      },
+      onError: () => {
+        mode = "snapshot-fallback";
+        bufferedChunks = [];
+        if (initialSnapshotSent) {
+          enqueueReset("error");
+          ensureFallbackPumpStarted();
+        }
+      }
+    }
+  });
+
+  if (input.isClosed()) {
+    await streamSubscription.release();
+    input.setStreamSubscription(null);
+    return null;
+  }
+  input.setStreamSubscription(streamSubscription);
+  if (input.pendingHint) {
+    await applySlotTerminalConnectionHint({ pump: null, streamSubscription }, input.pendingHint);
+  }
+  if (mode === "snapshot-fallback") {
+    ensureFallbackPumpStarted();
+    return streamSubscription;
+  }
+
+  const initialFrame = await captureStructuralFrame(true);
+  initialSnapshotSent = true;
+  sendFrame({
+    type: "frame",
+    data: initialFrame.data,
+    cols: initialFrame.cols,
+    rows: initialFrame.rows,
+    generation: initialFrame.generation,
+    initial: true,
+    mode
+  });
+  for (const chunk of bufferedChunks) {
+    enqueueStreamChunk(chunk);
+  }
+  bufferedChunks = [];
+  return streamSubscription;
+}
+
+function createSlotTerminalSnapshotPump(input: {
+  capture: SlotTerminalFrameCaptureBackend;
+  socket: { send: (data: string) => void };
+  subscription: SlotTerminalSubscription;
+  activeIntervalMs: number;
+  idleIntervalMs: number;
+  mode?: SlotTerminalStreamMode;
+  onError: (error: unknown) => void;
+}): SlotTerminalFramePump {
+  return new SlotTerminalFramePump({
+    capture: input.capture,
+    target: input.subscription.target,
+    socketPath: input.subscription.socketPath,
+    activeIntervalMs: input.activeIntervalMs,
+    idleIntervalMs: input.idleIntervalMs,
+    onFrame: (frame) => {
+      sendJson(input.socket, {
+        type: "frame",
+        data: frame.data,
+        cols: frame.cols,
+        rows: frame.rows,
+        generation: frame.generation,
+        initial: frame.initial,
+        ...(input.mode ? { mode: input.mode } : {})
+      });
+    },
+    onError: input.onError
+  });
 }
 
 export function evaluateSlotTerminalClientFrame(raw: Buffer | string): SlotTerminalClientFrameAction {
@@ -356,6 +612,21 @@ async function applySlotTerminalHint(pump: SlotTerminalFramePump, hint: SlotTerm
   }
   if (hint.visibility === "visible") {
     await pump.setVisibility("visible");
+  }
+}
+
+async function applySlotTerminalConnectionHint(
+  channels: { pump: SlotTerminalFramePump | null; streamSubscription: SlotTerminalStreamSubscription | null },
+  hint: SlotTerminalPollingHint
+): Promise<void> {
+  if (hint.visibility === "hidden") {
+    channels.streamSubscription?.pause();
+  }
+  if (channels.pump) {
+    await applySlotTerminalHint(channels.pump, hint);
+  }
+  if (hint.visibility === "visible") {
+    channels.streamSubscription?.resume();
   }
 }
 

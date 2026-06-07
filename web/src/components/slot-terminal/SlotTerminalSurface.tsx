@@ -51,6 +51,7 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
   const rendererRef = useRef<SlotTerminalFrameRenderer | null>(null);
   const [status, setStatus] = useState<"connecting" | "open" | "closed" | "error">("connecting");
   const [lastError, setLastError] = useState<string | null>(null);
+  const [historyLimited, setHistoryLimited] = useState(false);
   const [contextMenu, setContextMenu] = useState<SlotTerminalContextMenu | null>(null);
   const { containerRef, terminal } = useXtermTerminal({
     onInput: (data) => clientRef.current?.sendInput(data)
@@ -85,6 +86,7 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
     rendererRef.current = renderer;
     setStatus("connecting");
     setLastError(null);
+    setHistoryLimited(false);
     const client = createSlotTerminalClient({
       target,
       pane: props.pane,
@@ -92,7 +94,14 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
       callbacks: {
         onStatusChange: setStatus,
         onReady: (descriptor) => props.onReady?.(descriptor),
-        onFrame: (frame) => renderer.applyFrame(frame),
+        onFrame: (frame) => {
+          if (frame.mode === "snapshot-fallback") {
+            setHistoryLimited(true);
+          } else if (frame.mode === "stream") {
+            setHistoryLimited(false);
+          }
+          renderer.applyFrame(frame);
+        },
         onError: (code, message) => {
           setLastError(`${code}: ${message}`);
           props.onError?.(code, message);
@@ -232,6 +241,7 @@ export function TerminalSurface(props: TerminalSurfaceProps) {
       <div className={styles.header}>
         <span className={styles.statusDot} data-status={status} />
         <span className={styles.title}>{props.title ?? `${props.pane} terminal`}</span>
+        {historyLimited ? <span className={styles.modeWarning}>历史受限(快照模式)</span> : null}
         {lastError ? <span className={styles.error}>{lastError}</span> : null}
       </div>
       <div

@@ -28,8 +28,17 @@ import {
   SLOT_TERMINAL_INPUT_MAX_BYTES,
   evaluateSlotTerminalClientFrame,
   isSlotTerminalOriginAllowed,
-  registerSlotTerminalWebSocketRoutes
+  registerSlotTerminalWebSocketRoutes,
+  type SlotTerminalWebSocketDependencies
 } from "./slot-terminal.ws.js";
+import {
+  TmuxSlotTerminalStreamBackend,
+  type SlotTerminalStreamCallbacks,
+  type SlotTerminalStreamChunk,
+  type SlotTerminalStreamGapEvent,
+  type SlotTerminalStreamModeEvent,
+  type SlotTerminalStreamSubscribeInput
+} from "./slot-terminal-stream-recorder.js";
 import type {
   SlotTerminalBinding,
   SlotTerminalDescriptor,
@@ -37,6 +46,7 @@ import type {
   SlotTerminalProject,
   SlotTerminalStore
 } from "./slot-terminal.service.js";
+import { slotTerminalProtocolFixtureFrames } from "../../../../web/src/types/slot-terminal-fixtures.ts";
 
 const execFileAsync = promisify(execFile);
 const ALLOWED_ORIGIN = "http://localhost:5173";
@@ -141,12 +151,21 @@ function createRouteFixture(options: { projectRoot?: string; panes?: SlotTermina
   };
 }
 
-function buildCapture(framesByTarget: Record<string, string[]>): SlotTerminalFrameCaptureBackend & {
+function buildCapture(
+  framesByTarget: Record<string, string[]>,
+  dimensionsByTarget?: Record<string, Array<{ cols: number; rows: number }>>
+): SlotTerminalFrameCaptureBackend & {
   calls: Array<{ target: string; socketPath?: string; initial?: boolean }>;
+  dimensionCalls: Array<{ target: string; socketPath?: string; initial?: boolean }>;
 } {
   const offsets = new Map<string, number>();
-  return {
+  const dimensionOffsets = new Map<string, number>();
+  const capture: SlotTerminalFrameCaptureBackend & {
+    calls: Array<{ target: string; socketPath?: string; initial?: boolean }>;
+    dimensionCalls: Array<{ target: string; socketPath?: string; initial?: boolean }>;
+  } = {
     calls: [],
+    dimensionCalls: [],
     async capturePane(input) {
       this.calls.push(input);
       const frames = framesByTarget[input.target] ?? [""];
@@ -155,6 +174,114 @@ function buildCapture(framesByTarget: Record<string, string[]>): SlotTerminalFra
       return frames[Math.min(offset, frames.length - 1)];
     }
   };
+  if (dimensionsByTarget) {
+    capture.getPaneDimensions = async (input) => {
+      capture.dimensionCalls.push(input);
+      const dimensions = dimensionsByTarget[input.target] ?? [{ cols: 80, rows: 24 }];
+      const offset = dimensionOffsets.get(input.target) ?? 0;
+      dimensionOffsets.set(input.target, offset + 1);
+      return dimensions[Math.min(offset, dimensions.length - 1)];
+    };
+  }
+  return capture;
+}
+
+class FakeSlotTerminalStreamSubscription {
+  readonly id: number;
+  cursor: number;
+  paused = false;
+  released = false;
+  private bufferedChunks: SlotTerminalStreamChunk[] = [];
+  private gapOnResume: SlotTerminalStreamGapEvent | null = null;
+
+  constructor(
+    id: number,
+    private readonly callbacks: SlotTerminalStreamCallbacks
+  ) {
+    this.id = id;
+    this.cursor = 1;
+  }
+
+  pause(): void {
+    this.paused = true;
+  }
+
+  resume(): void {
+    if (this.released) {
+      return;
+    }
+    const gap = this.gapOnResume;
+    this.gapOnResume = null;
+    if (gap) {
+      this.paused = false;
+      this.callbacks.onGap?.(gap);
+      return;
+    }
+    const chunks = this.bufferedChunks;
+    this.bufferedChunks = [];
+    this.paused = false;
+    for (const chunk of chunks) {
+      this.callbacks.onChunk?.(chunk);
+      this.cursor = (chunk.seq ?? this.cursor) + 1;
+    }
+  }
+
+  async release(): Promise<void> {
+    this.released = true;
+  }
+
+  emitChunk(chunk: SlotTerminalStreamChunk): void {
+    if (this.released) {
+      return;
+    }
+    if (this.paused) {
+      this.bufferedChunks.push(chunk);
+      return;
+    }
+    this.callbacks.onChunk?.(chunk);
+    this.cursor = chunk.seq + 1;
+  }
+
+  emitMode(event: SlotTerminalStreamModeEvent): void {
+    this.callbacks.onMode?.(event);
+  }
+
+  emitGap(event: SlotTerminalStreamGapEvent): void {
+    this.callbacks.onGap?.(event);
+  }
+
+  setGapOnResume(event: SlotTerminalStreamGapEvent): void {
+    this.gapOnResume = event;
+  }
+}
+
+class FakeSlotTerminalStreamRecorder {
+  readonly subscriptions: FakeSlotTerminalStreamSubscription[] = [];
+  modeOnSubscribe: SlotTerminalStreamModeEvent = { mode: "stream" };
+  private nextSubscriptionId = 1;
+  private resolveFirstSubscription: ((subscription: FakeSlotTerminalStreamSubscription) => void) | null = null;
+
+  async subscribe(input: SlotTerminalStreamSubscribeInput) {
+    const subscription = new FakeSlotTerminalStreamSubscription(
+      this.nextSubscriptionId++,
+      input.callbacks ?? {}
+    );
+    this.subscriptions.push(subscription);
+    this.resolveFirstSubscription?.(subscription);
+    this.resolveFirstSubscription = null;
+    input.callbacks?.onMode?.(this.modeOnSubscribe);
+    return subscription as never;
+  }
+
+  async waitForSubscription(): Promise<FakeSlotTerminalStreamSubscription> {
+    const existing = this.subscriptions[0];
+    if (existing) {
+      return existing;
+    }
+    return await new Promise((resolve) => {
+      this.resolveFirstSubscription = resolve;
+    });
+  }
 }
 
 function buildSlotTerminalWebSocketApp(input: {
@@ -163,6 +290,7 @@ function buildSlotTerminalWebSocketApp(input: {
   capture: SlotTerminalFrameCaptureBackend;
   inputWriter?: SlotTerminalInputWriterBackend;
   auditSink?: SlotTerminalInputAuditSink;
+  streamRecorder?: SlotTerminalWebSocketDependencies["streamRecorder"];
   activeIntervalMs?: number;
   idleIntervalMs?: number;
   allowedOrigins?: string[];
@@ -175,6 +303,7 @@ function buildSlotTerminalWebSocketApp(input: {
     capture: input.capture,
     inputWriter: input.inputWriter,
     auditSink: input.auditSink,
+    streamRecorder: input.streamRecorder ?? null,
     activeIntervalMs: input.activeIntervalMs ?? 150,
     idleIntervalMs: input.idleIntervalMs ?? 1_000,
     allowedOrigins: input.allowedOrigins ?? [ALLOWED_ORIGIN]
@@ -552,6 +681,258 @@ describe("slot-terminal websocket", () => {
           initial: true
         }
       ]);
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("subscribes to stream mode before initial capture and flushes buffered chunks after the snapshot seam", async () => {
+    const fixture = createRouteFixture();
+    const streamRecorder = new FakeSlotTerminalStreamRecorder();
+    let releaseInitialCapture!: () => void;
+    const initialCaptureGate = new Promise<void>((resolve) => {
+      releaseInitialCapture = resolve;
+    });
+    const capture: SlotTerminalFrameCaptureBackend & {
+      calls: Array<{ target: string; socketPath?: string; initial?: boolean }>;
+    } = {
+      calls: [],
+      async capturePane(input) {
+        this.calls.push(input);
+        await initialCaptureGate;
+        return "initial snapshot\n";
+      },
+      async getPaneDimensions() {
+        return { cols: 80, rows: 24 };
+      }
+    };
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      streamRecorder
+    });
+
+    try {
+      await app.ready();
+      let socket: { send: (data: string) => void; terminate: () => void } | null = null;
+      const messagesPromise = new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        void app
+          .injectWS(
+            `/api/slot-terminal/ws?projectId=${fixture.projectId}&requirementId=${fixture.requirementId}&pane=claude`,
+            webSocketRequest(),
+            {
+              onInit(ws) {
+                socket = ws;
+                collectWebSocketMessages(ws, 3).then(resolve, reject);
+              }
+            }
+          )
+          .catch(reject);
+      });
+      const subscription = await streamRecorder.waitForSubscription();
+      subscription.emitChunk(slotTerminalProtocolFixtureFrames.streamChunkA);
+      releaseInitialCapture();
+      const messages = await messagesPromise;
+
+      expect(messages.map((message) => message.type)).toEqual(["ready", "frame", "frame"]);
+      expect(messages[1]).toMatchObject({
+        type: "frame",
+        data: "initial snapshot\n",
+        cols: 80,
+        rows: 24,
+        generation: 1,
+        initial: true,
+        mode: "stream"
+      });
+      expect(messages[2]).toEqual(slotTerminalProtocolFixtureFrames.streamChunkA);
+      expect(capture.calls).toEqual([
+        {
+          target: "%7",
+          socketPath: join(fixture.projectRoot, ".ccb", "ccbd", "tmux.sock"),
+          initial: true
+        }
+      ]);
+      socket?.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("pauses stream subscriptions while hidden and replays buffered chunks on visible", async () => {
+    const fixture = createRouteFixture();
+    const streamRecorder = new FakeSlotTerminalStreamRecorder();
+    const capture = buildCapture(
+      { "%7": ["initial snapshot\n"] },
+      { "%7": [{ cols: 80, rows: 24 }, { cols: 80, rows: 24 }, { cols: 80, rows: 24 }] }
+    );
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      streamRecorder
+    });
+
+    try {
+      await app.ready();
+      const { socket } = await collectInjectedMessages(
+        app,
+        `/api/slot-terminal/ws?projectId=${fixture.projectId}&requirementId=${fixture.requirementId}&pane=claude`,
+        2
+      );
+      const subscription = await streamRecorder.waitForSubscription();
+
+      socket.send(JSON.stringify({ type: "visibility", state: "hidden" }));
+      await waitForCondition(() => subscription.paused, "stream subscription was not paused");
+      expect(subscription.paused).toBe(true);
+      subscription.emitChunk({ kind: "stream", mode: "stream", seq: 1, data: "hidden-a" });
+      subscription.emitChunk({ kind: "stream", mode: "stream", seq: 2, data: "hidden-b" });
+
+      const replayPromise = collectWebSocketMessages(socket, 2);
+      socket.send(JSON.stringify({ type: "visibility", state: "visible" }));
+      const replay = await replayPromise;
+
+      expect(subscription.paused).toBe(false);
+      expect(replay).toEqual([
+        { type: "frame", kind: "stream", data: "hidden-a", seq: 1, mode: "stream" },
+        { type: "frame", kind: "stream", data: "hidden-b", seq: 2, mode: "stream" }
+      ]);
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("turns hidden resume ring gaps into reset frames with a deep snapshot", async () => {
+    const fixture = createRouteFixture();
+    const streamRecorder = new FakeSlotTerminalStreamRecorder();
+    const capture = buildCapture(
+      { "%7": ["initial snapshot\n", "reset snapshot\n"] },
+      { "%7": [{ cols: 80, rows: 24 }, { cols: 80, rows: 24 }] }
+    );
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      streamRecorder
+    });
+
+    try {
+      await app.ready();
+      const { socket } = await collectInjectedMessages(
+        app,
+        `/api/slot-terminal/ws?projectId=${fixture.projectId}&requirementId=${fixture.requirementId}&pane=claude`,
+        2
+      );
+      const subscription = await streamRecorder.waitForSubscription();
+      socket.send(JSON.stringify({ type: "visibility", state: "hidden" }));
+      await waitForCondition(() => subscription.paused, "stream subscription was not paused");
+      expect(subscription.paused).toBe(true);
+      subscription.setGapOnResume({
+        reason: "ring-gap",
+        fromSeq: 1,
+        nextSeq: 20,
+        message: "slot terminal stream ring no longer contains the requested cursor"
+      });
+      const resetPromise = collectWebSocketMessages(socket, 1);
+
+      socket.send(JSON.stringify({ type: "visibility", state: "visible" }));
+      const [reset] = await resetPromise;
+
+      expect(reset).toMatchObject({
+        type: "frame",
+        kind: "reset",
+        reason: "gap",
+        data: "reset snapshot\n",
+        cols: 80,
+        rows: 24,
+        generation: 2,
+        initial: true,
+        mode: "stream"
+      });
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("resets from a deep snapshot when pane dimensions change during stream mode", async () => {
+    const fixture = createRouteFixture();
+    const streamRecorder = new FakeSlotTerminalStreamRecorder();
+    const capture = buildCapture(
+      { "%7": ["initial snapshot\n", "resized snapshot\n"] },
+      { "%7": [{ cols: 80, rows: 24 }, { cols: 100, rows: 30 }, { cols: 100, rows: 30 }] }
+    );
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      streamRecorder
+    });
+
+    try {
+      await app.ready();
+      const { socket } = await collectInjectedMessages(
+        app,
+        `/api/slot-terminal/ws?projectId=${fixture.projectId}&requirementId=${fixture.requirementId}&pane=claude`,
+        2
+      );
+      const subscription = await streamRecorder.waitForSubscription();
+      const resetPromise = collectWebSocketMessages(socket, 1);
+
+      subscription.emitChunk({ kind: "stream", mode: "stream", seq: 1, data: "after resize" });
+      const [reset] = await resetPromise;
+
+      expect(reset).toMatchObject({
+        type: "frame",
+        kind: "reset",
+        reason: "resize",
+        data: "resized snapshot\n",
+        cols: 100,
+        rows: 30,
+        generation: 2,
+        initial: true,
+        mode: "stream"
+      });
+      socket.terminate();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("falls back to snapshot polling with mode metadata when the recorder is degraded", async () => {
+    const fixture = createRouteFixture();
+    const streamRecorder = new FakeSlotTerminalStreamRecorder();
+    streamRecorder.modeOnSubscribe = {
+      mode: "snapshot-fallback",
+      reason: "pane-pipe-occupied",
+      message: "tmux pane pipe is already occupied"
+    };
+    const capture = buildCapture({ "%7": ["fallback snapshot\n"] });
+    const app = buildSlotTerminalWebSocketApp({
+      store: fixture.store,
+      service: fixture.service,
+      capture,
+      streamRecorder
+    });
+
+    try {
+      await app.ready();
+      const { socket, messages } = await collectInjectedMessages(
+        app,
+        `/api/slot-terminal/ws?projectId=${fixture.projectId}&requirementId=${fixture.requirementId}&pane=claude`,
+        2
+      );
+
+      expect(messages[1]).toMatchObject({
+        type: "frame",
+        data: "fallback snapshot\n",
+        generation: 1,
+        initial: true,
+        mode: "snapshot-fallback"
+      });
+      expect(capture.calls).toHaveLength(1);
       socket.terminate();
     } finally {
       await app.close();
@@ -1224,8 +1605,11 @@ describe("slot-terminal websocket", () => {
     });
   });
 
-  it("tmux backend only uses read-only capture-pane and display-message on the real socket path", async () => {
+  it("tmux slot-terminal backends only use the allowed tmux command whitelist on the real socket path", async () => {
     const execFileProcess = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes("#{pane_pipe}")) {
+        return { stdout: "", stderr: "" };
+      }
       if (args.includes("display-message")) {
         return { stdout: "100 30\n", stderr: "" };
       }
@@ -1234,29 +1618,37 @@ describe("slot-terminal websocket", () => {
     const capture = new TmuxSlotTerminalFrameCapture({
       execFileProcess
     });
+    const streamBackend = new TmuxSlotTerminalStreamBackend({
+      execFileProcess
+    });
+    const socketPath = "/repo/SU-CCB/.ccb/ccbd/tmux.sock";
 
     const initialFrame = await capture.capturePane({
       target: "%7",
-      socketPath: "/repo/SU-CCB/.ccb/ccbd/tmux.sock",
+      socketPath,
       initial: true
     });
     const frame = await capture.capturePane({
       target: "%7",
-      socketPath: "/repo/SU-CCB/.ccb/ccbd/tmux.sock",
+      socketPath,
       initial: false
     });
     const dimensions = await capture.getPaneDimensions({
       target: "%7",
-      socketPath: "/repo/SU-CCB/.ccb/ccbd/tmux.sock"
+      socketPath
     });
+    const panePipe = await streamBackend.getPanePipe({ target: "%7", socketPath });
+    await streamBackend.stopPipe({ target: "%7", socketPath });
+    await streamBackend.startPipe({ target: "%7", socketPath, fifoPath: "/tmp/slot fifo" });
 
     expect(initialFrame).toBe("frame\n");
     expect(frame).toBe("frame\n");
     expect(dimensions).toEqual({ cols: 100, rows: 30 });
+    expect(panePipe).toBe("");
     expect(execFileProcess.mock.calls.map((call) => call[1])).toEqual([
       [
         "-S",
-        "/repo/SU-CCB/.ccb/ccbd/tmux.sock",
+        socketPath,
         "capture-pane",
         "-S",
         "-2000",
@@ -1267,7 +1659,7 @@ describe("slot-terminal websocket", () => {
       ],
       [
         "-S",
-        "/repo/SU-CCB/.ccb/ccbd/tmux.sock",
+        socketPath,
         "capture-pane",
         "-p",
         "-e",
@@ -1276,23 +1668,48 @@ describe("slot-terminal websocket", () => {
       ],
       [
         "-S",
-        "/repo/SU-CCB/.ccb/ccbd/tmux.sock",
+        socketPath,
         "display-message",
         "-p",
         "-t",
         "%7",
         "#{pane_width} #{pane_height}"
+      ],
+      [
+        "-S",
+        socketPath,
+        "display-message",
+        "-p",
+        "-t",
+        "%7",
+        "#{pane_pipe}"
+      ],
+      [
+        "-S",
+        socketPath,
+        "pipe-pane",
+        "-t",
+        "%7"
+      ],
+      [
+        "-S",
+        socketPath,
+        "pipe-pane",
+        "-o",
+        "-t",
+        "%7",
+        "cat > '/tmp/slot fifo'"
       ]
     ]);
     const invokedArgs = execFileProcess.mock.calls.flatMap(([, args]) => args);
     expect(invokedArgs).toContain("capture-pane");
     expect(invokedArgs).toContain("display-message");
+    expect(invokedArgs).toContain("pipe-pane");
     expect(invokedArgs).not.toContain("resize-window");
     expect(invokedArgs).not.toContain("refresh-client");
     expect(invokedArgs).not.toContain("-C");
     expect(invokedArgs).not.toContain("attach");
     expect(invokedArgs).not.toContain("send-keys");
-    expect(invokedArgs).not.toContain("pipe-pane");
   });
 
   it("tmux input writer maps text and keys to only send-keys -t commands", async () => {
@@ -1508,6 +1925,17 @@ async function mkdtempSlotTerminal(): Promise<string> {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCondition(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await sleep(10);
+  }
+  throw new Error(message);
 }
 
 async function resolveSinglePaneId(socketPath: string, sessionName: string): Promise<string> {
