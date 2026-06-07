@@ -67,6 +67,7 @@ export async function enforceRequirementDispatchQueuePolicy(
 
   const activeCancel = await client.anchorDispatchQueue.findFirst({
     where: {
+      projectId: input.projectId,
       ...(input.ignoreJobId ? { jobId: { not: input.ignoreJobId } } : {}),
       status: {
         in: [...ACTIVE_CANCEL_STATUSES]
@@ -100,6 +101,7 @@ export async function supersedePendingRequirementDispatches(
   const taskIds = await listRequirementTaskIds(client, input.projectId, input.requirementId);
   const result = await client.anchorDispatchQueue.updateMany({
     where: {
+      projectId: input.projectId,
       ...buildRequirementDispatchScopeWhere(input.requirementId, taskIds),
       ...(input.ignoreJobId ? { jobId: { not: input.ignoreJobId } } : {}),
       status: "pending",

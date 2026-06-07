@@ -52,6 +52,7 @@ async function createRequirementQueueFixture() {
   });
   const queue = await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job_worker_req",
       anchorId: anchor.anchorId,
       subjectType: "requirement",
@@ -102,6 +103,7 @@ async function createSubtaskQueueFixture() {
   });
   const queue = await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job_worker_subtask",
       anchorId: anchor.anchorId,
       subjectType: "subtask",
@@ -255,6 +257,7 @@ test("runAnchorDispatchWorkerTick submits slot-4 dispatches through the project 
   });
   const queue = await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job_worker_slot_4",
       anchorId: "slot-4",
       subjectType: "requirement",
@@ -316,6 +319,7 @@ test("runAnchorDispatchWorkerTick records 409 semantics when resize lock wait ti
   });
   const queue = await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job_worker_slot_lock_timeout",
       anchorId: "slot-4",
       subjectType: "requirement",

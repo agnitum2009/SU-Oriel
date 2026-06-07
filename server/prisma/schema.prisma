@@ -279,6 +279,8 @@ model AnchorDispatchQueue {
   /// @owner(console-internal, operator)
   id               String    @id @default(cuid())
   /// @owner(console-internal, operator)
+  projectId        String?
+  /// @owner(console-internal, operator)
   jobId            String    @unique
   /// @owner(console-internal, operator)
   anchorId         String
@@ -302,6 +304,7 @@ model AnchorDispatchQueue {
   readinessWarning Boolean?
 
   @@index([status, queuedAt])
+  @@index([projectId, status, anchorId, queuedAt])
   @@index([subjectType, subjectId])
 }
 

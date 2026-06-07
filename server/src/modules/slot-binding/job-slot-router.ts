@@ -173,6 +173,7 @@ export class JobSlotRouter {
     });
     const rows = await this.client.anchorDispatchQueue.findMany({
       where: {
+        projectId,
         status: "pending",
         anchorId: "slot-unassigned"
       },
@@ -184,16 +185,13 @@ export class JobSlotRouter {
     let failed = 0;
     for (const row of rows) {
       try {
-        const scope = await this.resolveQueueRowScope(row);
+        const scope = await this.resolveQueueRowScope(row, projectId);
         if (!scope) {
           failed++;
           await this.client.anchorDispatchQueue.update({
             where: { id: row.id },
             data: { status: "failed", failedAt: new Date(), errorMessage: "requirement scope missing" }
           });
-          continue;
-        }
-        if (scope.projectId !== projectId) {
           continue;
         }
         const slot = await this.resolveOrClaimSlot({
@@ -274,6 +272,7 @@ export class JobSlotRouter {
       const row = await tx.anchorDispatchQueue.upsert({
         where: { jobId: input.jobId },
         create: {
+          projectId: input.projectId,
           jobId: input.jobId,
           anchorId: input.slotId ?? "slot-unassigned",
           subjectType: input.subjectType,
@@ -283,6 +282,7 @@ export class JobSlotRouter {
           queuedAt: input.queuedAt
         },
         update: {
+          projectId: input.projectId,
           anchorId: input.slotId ?? "slot-unassigned",
           subjectType: input.subjectType,
           subjectId: input.subjectId,
@@ -326,10 +326,10 @@ export class JobSlotRouter {
     return task.taskKey;
   }
 
-  private async resolveQueueRowScope(row: AnchorDispatchQueue): Promise<QueueRowScope | null> {
+  private async resolveQueueRowScope(row: AnchorDispatchQueue, projectId: string): Promise<QueueRowScope | null> {
     if (row.subjectType === "requirement") {
-      const requirement = await this.client.requirement.findUnique({
-        where: { id: row.subjectId },
+      const requirement = await this.client.requirement.findFirst({
+        where: { id: row.subjectId, projectId },
         select: { id: true, projectId: true }
       });
       return requirement
@@ -344,8 +344,8 @@ export class JobSlotRouter {
     if (row.subjectType !== "subtask") {
       return null;
     }
-    const task = await this.client.task.findUnique({
-      where: { id: row.subjectId },
+    const task = await this.client.task.findFirst({
+      where: { id: row.subjectId, projectId },
       select: { projectId: true, requirementId: true }
     });
     if (!task?.requirementId) return null;

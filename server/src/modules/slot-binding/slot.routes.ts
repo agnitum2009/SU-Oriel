@@ -510,6 +510,7 @@ async function buildSlotProjection(
     }),
     db.anchorDispatchQueue.findMany({
       where: {
+        projectId,
         status: "pending",
         anchorId: {
           in: ["slot-unassigned", ...businessSlotIds]
@@ -693,6 +694,7 @@ async function findLatestSubmittedQueueRow(
 ): Promise<AnchorDispatchQueue | null> {
   const rows = await db.anchorDispatchQueue.findMany({
     where: {
+      projectId,
       anchorId: slotId,
       status: "submitted"
     },

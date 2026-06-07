@@ -287,6 +287,7 @@ test("reconcileCancelledRequirementProjection releases non-busy slot and superse
   await prisma.anchorDispatchQueue.createMany({
     data: [
       {
+        projectId: project.id,
         jobId: "job-reconcile-requirement",
         anchorId: "slot-1",
         subjectType: "requirement",
@@ -295,6 +296,7 @@ test("reconcileCancelledRequirementProjection releases non-busy slot and superse
         status: "pending"
       },
       {
+        projectId: project.id,
         jobId: "job-reconcile-subtask",
         anchorId: "slot-1",
         subjectType: "subtask",
@@ -303,6 +305,7 @@ test("reconcileCancelledRequirementProjection releases non-busy slot and superse
         status: "pending"
       },
       {
+        projectId: project.id,
         jobId: "job-reconcile-cancel",
         anchorId: "slot-1",
         subjectType: "requirement",
@@ -359,6 +362,7 @@ test("reconcileCancelledRequirementProjection does not release busy slots before
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-busy-reconcile",
       anchorId: "slot-1",
       subjectType: "requirement",

@@ -170,6 +170,7 @@ test("GET /api/projects/:projectId/slots projects main lane, three slots, queue,
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-slot-route-queued",
       anchorId: "slot-unassigned",
       subjectType: "requirement",
@@ -181,6 +182,7 @@ test("GET /api/projects/:projectId/slots projects main lane, three slots, queue,
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: otherProject.id,
       jobId: "job-slot-route-other-project",
       anchorId: "slot-unassigned",
       subjectType: "requirement",
@@ -347,6 +349,7 @@ test("GET /api/projects/:projectId/slots reports tail shrink eligibility and blo
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-slot-route-resize-cancel",
       anchorId: "slot-4",
       subjectType: "requirement",
@@ -457,6 +460,7 @@ test("POST /api/projects/:projectId/slots/resize returns structured shrink failu
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-slot-route-shrink-cancel",
       anchorId: "slot-4",
       subjectType: "requirement",
@@ -850,6 +854,7 @@ test("POST slot release drains a queued requirement and syncs the final tips pro
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-slot-route-release-drain",
       anchorId: "slot-unassigned",
       subjectType: "requirement",
@@ -1047,6 +1052,7 @@ test("POST slot cancel-current-job best-effort cancels the latest submitted slot
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job-slot-current",
       anchorId: "slot-1",
       subjectType: "requirement",

@@ -206,6 +206,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
   const { project, requirement } = await createRequirementFixture();
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: `job-cancel-${randomUUID()}`,
       anchorId: "slot-1",
       subjectType: "requirement",
@@ -252,6 +253,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
   await prisma.anchorDispatchQueue.createMany({
     data: [
       {
+        projectId: first.project.id,
         jobId: `job-stale-cancel-${randomUUID()}`,
         anchorId: "slot-1",
         subjectType: "requirement",
@@ -260,6 +262,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
         status: "submitted"
       },
       {
+        projectId: second.project.id,
         jobId: `job-stale-reactivate-${randomUUID()}`,
         anchorId: "slot-2",
         subjectType: "requirement",
@@ -332,6 +335,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
   await prisma.anchorDispatchQueue.createMany({
     data: [
       {
+        projectId: project.id,
         jobId: "job-requirement-pending",
         anchorId: "slot-1",
         subjectType: "requirement",
@@ -340,6 +344,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
         status: "pending"
       },
       {
+        projectId: project.id,
         jobId: "job-subtask-pending",
         anchorId: "slot-1",
         subjectType: "subtask",
@@ -348,6 +353,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
         status: "pending"
       },
       {
+        projectId: project.id,
         jobId: "job-submitted",
         anchorId: "slot-1",
         subjectType: "requirement",
@@ -356,6 +362,7 @@ test("POST /api/projects/:projectId/requirements/:requirementId/anchor-dispatch 
         status: "submitted"
       },
       {
+        projectId: project.id,
         jobId: "job-other-scope",
         anchorId: "slot-2",
         subjectType: "requirement",

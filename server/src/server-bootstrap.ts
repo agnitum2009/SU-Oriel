@@ -161,7 +161,13 @@ async function findProjectIdsWithUnassignedQueue(client: PrismaClient): Promise<
   const rows = await client.anchorDispatchQueue.findMany({
     where: {
       status: "pending",
-      anchorId: "slot-unassigned"
+      anchorId: "slot-unassigned",
+      projectId: {
+        not: null
+      }
+    },
+    select: {
+      projectId: true
     },
     orderBy: {
       queuedAt: "asc"
@@ -170,24 +176,8 @@ async function findProjectIdsWithUnassignedQueue(client: PrismaClient): Promise<
   });
   const projectIds = new Set<string>();
   for (const row of rows) {
-    if (row.subjectType === "requirement") {
-      const requirement = await client.requirement.findUnique({
-        where: { id: row.subjectId },
-        select: { projectId: true }
-      });
-      if (requirement) {
-        projectIds.add(requirement.projectId);
-      }
-      continue;
-    }
-    if (row.subjectType === "subtask") {
-      const task = await client.task.findUnique({
-        where: { id: row.subjectId },
-        select: { projectId: true }
-      });
-      if (task) {
-        projectIds.add(task.projectId);
-      }
+    if (row.projectId) {
+      projectIds.add(row.projectId);
     }
   }
   return [...projectIds];

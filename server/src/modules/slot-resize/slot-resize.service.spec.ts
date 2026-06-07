@@ -288,6 +288,7 @@ test.each([
   const requirementId = await createRequirement(projectId);
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId,
       jobId: `job_${randomUUID()}`,
       anchorId: "slot-4",
       subjectType: "requirement",

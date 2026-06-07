@@ -136,6 +136,9 @@ async function runAnchorDispatchWorkerTickWithConfig(
 ): Promise<AnchorDispatchWorkerTickResult> {
   const rows = await config.prismaClient.anchorDispatchQueue.findMany({
     where: {
+      projectId: {
+        not: null
+      },
       status: "pending",
       anchorId: {
         not: "slot-unassigned"
@@ -175,8 +178,12 @@ async function processAnchorDispatchRow(
   row: AnchorDispatchQueue
 ): Promise<"submitted" | "failed"> {
   try {
+    const projectId = row.projectId;
+    if (!projectId) {
+      throw new Error("dispatch project scope missing");
+    }
     if (isSlotId(row.anchorId)) {
-      const project = await resolveProjectForDispatchSubject(config.prismaClient, row);
+      const project = await resolveProjectForDispatchSubject(config.prismaClient, row, projectId);
       if (!project) {
         throw new Error(`dispatch subject not found: ${row.subjectType}:${row.subjectId}`);
       }
@@ -192,7 +199,7 @@ async function processAnchorDispatchRow(
         }
       );
     }
-    const askInput = await buildAskInput(config.prismaClient, row);
+    const askInput = await buildAskInput(config.prismaClient, row, projectId);
     const anchor = await config.prismaClient.anchorAllocation.findUnique({
       where: {
         anchorId: row.anchorId
@@ -200,6 +207,9 @@ async function processAnchorDispatchRow(
     });
     if (!anchor || anchor.state === "destroyed") {
       throw new AnchorNotFoundError(row.anchorId);
+    }
+    if (anchor.projectId && anchor.projectId !== projectId) {
+      throw new Error(`dispatch anchor project mismatch: ${row.anchorId}`);
     }
 
     const readiness = await config.waitForClaudeTuiReady(anchor.anchorPath);
@@ -314,12 +324,14 @@ async function processSlotDispatchRow(
 
 async function buildAskInput(
   db: PrismaClient,
-  row: AnchorDispatchQueue
+  row: AnchorDispatchQueue,
+  projectId: string
 ): Promise<AskAcrossAnchorInput> {
   if (row.subjectType === "requirement") {
-    const requirement = await db.requirement.findUnique({
+    const requirement = await db.requirement.findFirst({
       where: {
-        id: row.subjectId
+        id: row.subjectId,
+        projectId
       },
       select: {
         id: true
@@ -337,9 +349,10 @@ async function buildAskInput(
   }
 
   if (row.subjectType === "subtask") {
-    const task = await db.task.findUnique({
+    const task = await db.task.findFirst({
       where: {
-        id: row.subjectId
+        id: row.subjectId,
+        projectId
       },
       select: {
         taskKey: true
@@ -361,11 +374,12 @@ async function buildAskInput(
 
 async function resolveProjectForDispatchSubject(
   db: PrismaClient,
-  row: AnchorDispatchQueue
+  row: AnchorDispatchQueue,
+  projectId: string
 ): Promise<DispatchProject | null> {
   if (row.subjectType === "requirement") {
-    const requirement = await db.requirement.findUnique({
-      where: { id: row.subjectId },
+    const requirement = await db.requirement.findFirst({
+      where: { id: row.subjectId, projectId },
       select: {
         project: {
           select: { id: true, localPath: true, slotCount: true }
@@ -375,8 +389,8 @@ async function resolveProjectForDispatchSubject(
     return requirement?.project ?? null;
   }
   if (row.subjectType === "subtask") {
-    const task = await db.task.findUnique({
-      where: { id: row.subjectId },
+    const task = await db.task.findFirst({
+      where: { id: row.subjectId, projectId },
       select: {
         taskKey: true,
         project: {

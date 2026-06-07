@@ -114,6 +114,11 @@ type SubtaskDispatchGate = {
   isPendingDispatch: boolean;
   ineligibleReason: string | null;
 };
+type SubtaskDispatchGateTask = Pick<AnchorableTask, "id" | "status" | "currentNode"> & {
+  project: {
+    id: string;
+  };
+};
 
 export interface AnchorRouteDependencies {
   prismaClient?: PrismaClient;
@@ -678,13 +683,14 @@ export async function registerAnchorRoutes(
   }
 
   async function buildSubtaskDispatchGate(
-    task: Pick<AnchorableTask, "id" | "status" | "currentNode">,
+    task: SubtaskDispatchGateTask,
     command: string | null | undefined,
     options: { requiresDispatchReadiness?: boolean } = {}
   ): Promise<SubtaskDispatchGate> {
     const [pendingDispatch, activeAnchor] = await Promise.all([
       db.anchorDispatchQueue.findFirst({
         where: {
+          projectId: task.project.id,
           subjectType: "subtask",
           subjectId: task.id,
           status: "pending"

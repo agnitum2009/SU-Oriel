@@ -120,6 +120,7 @@ test("GET batch-candidates honors active AnchorAllocation rows and keeps pending
   });
   await prisma.anchorDispatchQueue.create({
     data: {
+      projectId: project.id,
       jobId: "job_pending_subtask",
       anchorId: "anchor_pending_subtask",
       subjectType: "subtask",

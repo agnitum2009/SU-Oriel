@@ -156,6 +156,7 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
     }
 
     const dispatchRows = await this.loadProviderDispatchRows(
+      projectId,
       requirements.map((requirement) => requirement.id),
       [...taskById.keys()]
     );
@@ -252,7 +253,7 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
     }
   }
 
-  private async loadProviderDispatchRows(requirementIds: string[], taskIds: string[]) {
+  private async loadProviderDispatchRows(projectId: string, requirementIds: string[], taskIds: string[]) {
     const predicates = [];
     if (requirementIds.length > 0) {
       predicates.push({ subjectType: "requirement", subjectId: { in: requirementIds } });
@@ -265,6 +266,7 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
     }
     return await this.db.anchorDispatchQueue.findMany({
       where: {
+        projectId,
         status: { in: ["pending", "submitted"] },
         OR: predicates
       },

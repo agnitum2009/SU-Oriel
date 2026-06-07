@@ -100,11 +100,6 @@ type BlockingQueueRow = {
   command: string;
 };
 
-type QueueProjectSubject = {
-  subjectType: string;
-  subjectId: string;
-};
-
 export class SlotResizeService {
   private readonly client: PrismaClient;
   private readonly lock: ManagedConfigMutationLock;
@@ -413,50 +408,21 @@ async function findBlockingQueueRows(
 ): Promise<BlockingQueueRow[]> {
   const rows = await client.anchorDispatchQueue.findMany({
     where: {
+      projectId,
       anchorId: slotId,
       status: { in: ["pending", "submitted"] }
     },
     select: {
       jobId: true,
       status: true,
-      command: true,
-      subjectType: true,
-      subjectId: true
+      command: true
     }
   });
-  const blocking: BlockingQueueRow[] = [];
-  for (const row of rows) {
-    if (await queueRowBelongsToProject(client, row, projectId)) {
-      blocking.push({
-        jobId: row.jobId,
-        status: row.status,
-        command: row.command
-      });
-    }
-  }
-  return blocking;
-}
-
-async function queueRowBelongsToProject(
-  client: PrismaClient,
-  row: QueueProjectSubject,
-  projectId: string
-): Promise<boolean> {
-  if (row.subjectType === "requirement") {
-    const requirement = await client.requirement.findUnique({
-      where: { id: row.subjectId },
-      select: { projectId: true }
-    });
-    return requirement?.projectId === projectId;
-  }
-  if (row.subjectType === "subtask") {
-    const task = await client.task.findUnique({
-      where: { id: row.subjectId },
-      select: { projectId: true }
-    });
-    return task?.projectId === projectId;
-  }
-  return true;
+  return rows.map((row) => ({
+    jobId: row.jobId,
+    status: row.status,
+    command: row.command
+  }));
 }
 
 async function readManagedConfig(projectRoot: string): Promise<string | null> {

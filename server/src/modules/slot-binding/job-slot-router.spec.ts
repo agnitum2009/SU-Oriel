@@ -90,6 +90,7 @@ test("JobSlotRouter binds a requirement, writes slot queue row, and targets the 
   assert.equal(submit.mock.calls[0]?.[0].slotId, "slot-1");
 
   const row = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: result.jobId } });
+  assert.equal(row.projectId, project.id);
   assert.equal(row.anchorId, "slot-1");
   assert.equal(row.status, "submitted");
   assert.equal(await prisma.eventJournal.count({ where: { eventType: "slot_queued_request" } }), 1);
@@ -190,6 +191,18 @@ test("JobSlotRouter.tick drains the oldest current-project queued request into a
     command: "/ccb:su-flow --payload {}",
     requestedAt: new Date("2026-05-24T00:00:00.000Z")
   });
+  await prisma.anchorDispatchQueue.create({
+    data: {
+      projectId: projectTwo.project.id,
+      jobId: "job-other-project-broken-subject",
+      anchorId: "slot-unassigned",
+      subjectType: "requirement",
+      subjectId: "missing-other-project-requirement",
+      command: "/ccb:su-flow --payload {}",
+      status: "pending",
+      queuedAt: new Date("2026-05-23T23:59:59.000Z")
+    }
+  });
   const currentProjectQueued = await router.enqueue({
     projectId: projectOne.project.id,
     requirementId: projectOne.requirements[3].id,
@@ -214,6 +227,9 @@ test("JobSlotRouter.tick drains the oldest current-project queued request into a
   assert.equal(drained.status, "pending");
   const untouched = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: otherProjectQueued.jobId } });
   assert.equal(untouched.anchorId, "slot-unassigned");
+  const brokenOtherProject = await prisma.anchorDispatchQueue.findUniqueOrThrow({ where: { jobId: "job-other-project-broken-subject" } });
+  assert.equal(brokenOtherProject.status, "pending");
+  assert.equal(brokenOtherProject.errorMessage, null);
   assert.equal(await prisma.eventJournal.count({ where: { eventType: "slot_queued_request" } }), 2);
   assert.equal(await prisma.anchorAllocation.count(), 0);
 });
