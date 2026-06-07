@@ -42,6 +42,7 @@ export interface ProviderActivityCollectInput {
   projectId: string;
   projectRoot: string;
   now: Date;
+  ackedRefs?: ReadonlySet<string>;
   slotBindings: readonly ProviderActivitySlotBinding[];
   dispatchRows: readonly ProviderActivityDispatchRow[];
   taskRequirementByTaskId: ReadonlyMap<string, string | null>;
@@ -71,12 +72,20 @@ interface MainAgentState {
   activeSince: Date | null;
 }
 
+interface DebounceEntry {
+  firstSeenMs: number;
+  lastSeenMs: number;
+}
+
 export class ProviderActivitySource {
-  private readonly debounceFirstSeen = new Map<string, number>();
+  private readonly debounceFirstSeen = new Map<string, DebounceEntry>();
   private readonly mainAgentState = new Map<string, MainAgentState>();
   private readonly completedItems = new Map<string, AttentionItem>();
 
   async collect(input: ProviderActivityCollectInput): Promise<AttentionItem[]> {
+    this.sweepDebounceEntries(input.now);
+    this.deleteAckedCompletedItems(input.projectId, input.ackedRefs ?? new Set());
+
     const configText = await readFile(join(input.projectRoot, ".ccb", "ccb.config"), "utf8").catch(() => null);
     if (!configText) {
       return [];
@@ -331,7 +340,8 @@ export class ProviderActivitySource {
     }
 
     const ref = `${providerActivityRef(activity, "completed", input.now)}/${activity.updatedAt.toISOString()}`;
-    if (this.completedItems.has(ref)) {
+    const completedKey = completedItemKey(input.projectId, ref);
+    if (this.completedItems.has(completedKey)) {
       return null;
     }
     const item: AttentionItem = {
@@ -358,7 +368,7 @@ export class ProviderActivitySource {
         eventName: activity.eventName
       }
     };
-    this.completedItems.set(ref, item);
+    this.completedItems.set(completedKey, item);
     return item;
   }
 
@@ -366,15 +376,40 @@ export class ProviderActivitySource {
     return [...this.completedItems.values()].filter((item) => item.projectId === projectId);
   }
 
+  private deleteAckedCompletedItems(projectId: string, ackedRefs: ReadonlySet<string>): void {
+    if (ackedRefs.size === 0) {
+      return;
+    }
+    for (const [key, item] of this.completedItems) {
+      if (item.projectId === projectId && ackedRefs.has(item.ref)) {
+        this.completedItems.delete(key);
+      }
+    }
+  }
+
+  private sweepDebounceEntries(now: Date): void {
+    const cutoffMs = now.getTime() - FALLBACK_REF_TTL_MS;
+    for (const [key, entry] of this.debounceFirstSeen) {
+      if (entry.lastSeenMs < cutoffMs) {
+        this.debounceFirstSeen.delete(key);
+      }
+    }
+  }
+
   private debounceReady(key: string, now: Date): boolean {
     const nowMs = now.getTime();
-    const firstSeen = this.debounceFirstSeen.get(key);
-    if (!firstSeen) {
-      this.debounceFirstSeen.set(key, nowMs);
+    const entry = this.debounceFirstSeen.get(key);
+    if (!entry) {
+      this.debounceFirstSeen.set(key, { firstSeenMs: nowMs, lastSeenMs: nowMs });
       return false;
     }
-    return nowMs - firstSeen >= DEBOUNCE_MS;
+    entry.lastSeenMs = nowMs;
+    return nowMs - entry.firstSeenMs >= DEBOUNCE_MS;
   }
+}
+
+function completedItemKey(projectId: string, ref: string): string {
+  return `${projectId}:${ref}`;
 }
 
 function dispatchMatchesRequirement(

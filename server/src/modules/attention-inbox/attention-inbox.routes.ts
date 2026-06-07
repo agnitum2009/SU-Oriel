@@ -8,8 +8,19 @@ import {
   type AttentionInboxServiceLike
 } from "./attention-inbox.service.js";
 
+const ATTENTION_ACK_REF_PREFIXES = [
+  "review_intent:",
+  "consult_request:",
+  "event_journal:",
+  "dev_task_approval:",
+  "slot_binding:",
+  "provider_activity:"
+] as const;
+
 const ackBodySchema = z.object({
-  ref: z.string().trim().min(1).max(500)
+  ref: z.string().trim().min(1).max(500).refine(isAllowedAttentionAckRef, {
+    message: "attention ref 前缀不合法"
+  })
 });
 
 const settingsBodySchema = z.object({
@@ -84,6 +95,10 @@ function parseOptionalDate(value: string | null): Date | null | "invalid" {
   if (value === null) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "invalid" : date;
+}
+
+function isAllowedAttentionAckRef(ref: string): boolean {
+  return ATTENTION_ACK_REF_PREFIXES.some((prefix) => ref.startsWith(prefix));
 }
 
 function handleAttentionError(reply: { status: (code: number) => void }, error: unknown): { message: string } {

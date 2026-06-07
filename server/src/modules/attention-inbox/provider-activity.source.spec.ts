@@ -263,6 +263,73 @@ test("main agent completion requires active >=60s, ignores cold idle and restart
   assert.equal((await restarted.collect(baseInput(root, NOW, []))).some((item) => item.kind === "agent_completed"), false);
 });
 
+test("main agent completed item is removed after ack and does not revive", async () => {
+  const root = await createProjectRoot();
+  const source = new ProviderActivitySource();
+
+  await writeActivity(root, "main_codex", "codex", {
+    state: "active",
+    event_name: "PreToolUse",
+    updated_at: "2026-06-06T11:58:50.000Z",
+    provider_session_id: "main-ack",
+    diagnostics: { tool_name: "Bash" }
+  });
+  await source.collect(baseInput(root, new Date("2026-06-06T11:58:50.000Z"), []));
+  await writeActivity(root, "main_codex", "codex", {
+    state: "idle",
+    event_name: "Stop",
+    updated_at: NOW.toISOString(),
+    provider_session_id: "main-ack",
+    diagnostics: {}
+  });
+
+  const completed = await source.collect(baseInput(root, NOW, []));
+  const completedRef = completed.find((item) => item.kind === "agent_completed")?.ref;
+  assert.ok(completedRef);
+  assert.equal((await source.collect(baseInput(root, NOW, []))).some((item) => item.ref === completedRef), true);
+
+  const afterAck = await source.collect({
+    ...baseInput(root, NOW, []),
+    ackedRefs: new Set([completedRef])
+  });
+  assert.equal(afterAck.some((item) => item.ref === completedRef), false);
+  assert.equal((await source.collect(baseInput(root, NOW, []))).some((item) => item.ref === completedRef), false);
+});
+
+test("input debounce entries expire after TTL since last access", async () => {
+  const root = await createProjectRoot();
+  const source = new ProviderActivitySource();
+  const slot = slotBinding("slot-1", "bound");
+
+  await writeActivity(root, "slot1_codex", "codex", {
+    state: "pending",
+    event_name: "Notification",
+    updated_at: "2026-06-06T11:58:50.000Z",
+    provider_session_id: "session-input-ttl",
+    diagnostics: {}
+  });
+
+  assert.equal((await source.collect(baseInput(root, NOW, [slot]))).some((item) => item.metadata?.reason === "input"), false);
+  assert.equal(
+    (await source.collect(baseInput(root, new Date("2026-06-06T12:00:10.000Z"), [slot]))).some(
+      (item) => item.metadata?.reason === "input"
+    ),
+    true
+  );
+  assert.equal(
+    (await source.collect(baseInput(root, new Date("2026-06-06T12:10:11.000Z"), [slot]))).some(
+      (item) => item.metadata?.reason === "input"
+    ),
+    false
+  );
+  assert.equal(
+    (await source.collect(baseInput(root, new Date("2026-06-06T12:10:21.000Z"), [slot]))).some(
+      (item) => item.metadata?.reason === "input"
+    ),
+    true
+  );
+});
+
 test("suspect fallback is warning-only for busy slot with submitted job and stale activity", async () => {
   const root = await createProjectRoot();
   const source = new ProviderActivitySource();

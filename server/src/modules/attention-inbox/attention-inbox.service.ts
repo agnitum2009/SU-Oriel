@@ -124,6 +124,7 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
       throw new AttentionProjectNotFoundError();
     }
 
+    const ackedRefs = new Set(ackRows.map((row) => row.ref));
     const taskById = new Map<string, AttentionTaskContext>();
     const taskByKey = new Map<string, AttentionTaskContext>();
     for (const task of tasks) {
@@ -162,6 +163,7 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
       projectId,
       projectRoot: project.localPath,
       now,
+      ackedRefs,
       slotBindings: slotRows,
       dispatchRows,
       taskRequirementByTaskId: new Map([...taskById].map(([taskId, task]) => [taskId, task.requirementId])),
@@ -184,7 +186,6 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
       ...providerActivityItems
     ];
 
-    const ackedRefs = new Set(ackRows.map((row) => row.ref));
     const unacked = items.filter((item) => !ackedRefs.has(item.ref));
     const dndActive = settings?.dndUntil ? settings.dndUntil.getTime() > now.getTime() : false;
     const visible = dndActive ? [] : unacked;

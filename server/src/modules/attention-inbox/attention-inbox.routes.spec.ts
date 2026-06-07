@@ -97,6 +97,40 @@ test("attention routes list items and ack the same ref idempotently", async () =
   await app.close();
 });
 
+test("attention ack route accepts only source-native ref prefixes", async () => {
+  const fx = await fixture();
+  const app = buildApp({ enableFileWatcher: false });
+
+  const allowedRefs = [
+    "review_intent:route-review",
+    "consult_request:route-consult",
+    "event_journal:route-event",
+    "dev_task_approval:route-task/pending_user_decision",
+    "slot_binding:slot-1/unhealthy",
+    "provider_activity:slot1_codex/session/permission"
+  ];
+  for (const ref of allowedRefs) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${fx.projectId}/attention/ack`,
+      payload: { ref }
+    });
+    assert.equal(response.statusCode, 200, ref);
+    assert.equal(response.json().ref, ref);
+  }
+
+  for (const ref of ["unknown_source:route", "provider_activity_without_colon"]) {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/projects/${fx.projectId}/attention/ack`,
+      payload: { ref }
+    });
+    assert.equal(response.statusCode, 400, ref);
+  }
+
+  await app.close();
+});
+
 test("attention settings routes persist and clear project DND", async () => {
   const fx = await fixture();
   const app = buildApp({ enableFileWatcher: false });

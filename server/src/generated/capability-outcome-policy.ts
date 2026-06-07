@@ -248,6 +248,31 @@ export const CAPABILITY_OUTCOME_POLICIES = [
       "no_self_referential_event",
       "requirement_promote_forward_only"
     ]
+  },
+  {
+    "policy_id": "requirement.promote:delivering:requirement",
+    "capability_id": "requirement.promote",
+    "outcome_type": "delivering",
+    "subject_type": "requirement",
+    "write_target": "requirement_md",
+    "state_effects": {
+      "status": "set:delivering"
+    },
+    "evidence_required": {
+      "mode": "all",
+      "items": [
+        {
+          "kind": "A",
+          "source": "event_journal",
+          "check_id": "journal_event_exists"
+        }
+      ]
+    },
+    "must_ask_refs": [],
+    "guards": [
+      "no_self_referential_event",
+      "requirement_promote_delivering_forward_only"
+    ]
   }
 ] as const;
 export const CAPABILITY_OUTCOME_ALLOWED_BUSINESS_FIELDS = [
