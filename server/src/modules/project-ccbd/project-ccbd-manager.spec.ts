@@ -69,6 +69,24 @@ test("ProjectCcbdManager creates missing managed config and starts one ccbd at t
   assert.match(config, /^slot-3 = "slot3_claude:claude; slot3_codex:codex"$/m);
 });
 
+test("ProjectCcbdManager renders managed config from the project slotCount", async () => {
+  const { projectId, root } = await createProjectWithRoot();
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { slotCount: 4 }
+  });
+  const manager = new ProjectCcbdManager(prisma, launcher());
+
+  const runtime = await manager.ensureStarted(projectId);
+
+  const config = await readFile(join(root, ".ccb", "ccb.config"), "utf8");
+  assert.match(config, /^slot-4 = "slot4_claude:claude; slot4_codex:codex"$/m);
+  assert.match(config, /^\[agents\.slot4_codex]$/m);
+  assert.equal(runtime.status, "ready");
+  const status = await manager.getStatus(projectId);
+  assert.equal(status.config.drift, null);
+});
+
 test("ProjectCcbdManager reconciles sidebar tips from current slot bindings on startup", async () => {
   const { projectId, root } = await createProjectWithRoot();
   const requirement = await prisma.requirement.create({

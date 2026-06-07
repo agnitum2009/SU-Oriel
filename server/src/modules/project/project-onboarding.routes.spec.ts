@@ -24,12 +24,13 @@ async function createProjectRoot(): Promise<string> {
   return join(tmpdir(), `ccb-onboarding-${Date.now()}-${randomUUID()}`);
 }
 
-async function createProject(localPath: string): Promise<{ id: string; localPath: string }> {
+async function createProject(localPath: string, slotCount = 3): Promise<{ id: string; localPath: string }> {
   return await prisma.project.create({
     data: {
       name: "Onboarding Project",
       localPath,
-      summary: "Project onboarding fixture"
+      summary: "Project onboarding fixture",
+      slotCount
     },
     select: {
       id: true,
@@ -204,6 +205,26 @@ test("GET /api/projects/:projectId/onboarding-status accepts generated document-
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().knowledgeBaseReady, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/projects/:projectId/onboarding-status lazily renders the project slotCount template", async () => {
+  const app = buildApp({ enableFileWatcher: false });
+  const projectRoot = await createProjectRoot();
+  const project = await createProject(projectRoot, 4);
+
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/projects/${project.id}/onboarding-status`
+    });
+
+    assert.equal(response.statusCode, 200);
+    const manualCommand = response.json().manualCommand as string;
+    assert.ok(manualCommand.includes(`slot-4 = "slot4_claude:claude; slot4_codex:codex"`));
+    assert.ok(manualCommand.includes("[agents.slot4_codex]"));
   } finally {
     await app.close();
   }

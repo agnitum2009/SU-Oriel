@@ -7,13 +7,20 @@ import { afterEach, test } from "vitest";
 
 import {
   buildManagedCcbConfig,
+  collectCoreLines,
+  collectSlotAgentOverridesJson,
+  computeManagedCoreSignature,
   MANAGED_AGENT_NAMES,
   MANAGED_WINDOW_NAMES,
   ensureManagedCcbConfig,
+  parseSlotAgentOverridesJson,
+  projectSlotTopology,
   renderManagedCcbConfig
 } from "./managed-config.service.js";
+import { ManagedConfigMutationLock } from "./managed-config-mutation-lock.js";
 
 const tmpRoots: string[] = [];
+const defaultTopology = projectSlotTopology();
 
 afterEach(async () => {
   await Promise.all(tmpRoots.map((root) => rm(root, { recursive: true, force: true })));
@@ -32,13 +39,14 @@ test("buildManagedCcbConfig keeps the slotCount 3 empty-overrides golden output 
     "utf8"
   );
 
-  assert.equal(buildManagedCcbConfig(), golden);
+  assert.equal(buildManagedCcbConfig(defaultTopology), golden);
 });
 
 test("renderManagedCcbConfig emits v7 main plus three slot windows and eight managed agents", () => {
   const result = renderManagedCcbConfig({
     projectId: "project-1",
-    projectRoot: "/repo"
+    projectRoot: "/repo",
+    topology: defaultTopology
   });
 
   assert.equal(result.drift?.kind, "missing");
@@ -72,6 +80,7 @@ test("renderManagedCcbConfig emits sidebar tips with TOML-safe JSON string liter
   const result = renderManagedCcbConfig({
     projectId: "project-1",
     projectRoot: "/repo",
+    topology: defaultTopology,
     sidebarViewTips: tips
   });
 
@@ -86,6 +95,7 @@ test("renderManagedCcbConfig emits an empty managed tips array when tips are pro
   const result = renderManagedCcbConfig({
     projectId: "project-1",
     projectRoot: "/repo",
+    topology: defaultTopology,
     sidebarViewTips: []
   });
 
@@ -96,16 +106,19 @@ test("renderManagedCcbConfig emits an empty managed tips array when tips are pro
 test("sidebar tips do not affect managed core signature or drift detection", () => {
   const baseline = renderManagedCcbConfig({
     projectId: "project-1",
-    projectRoot: "/repo"
+    projectRoot: "/repo",
+    topology: defaultTopology
   });
   const withTips = renderManagedCcbConfig({
     projectId: "project-1",
     projectRoot: "/repo",
+    topology: defaultTopology,
     sidebarViewTips: ["slot-1: Requirement"]
   });
   const existingWithTips = renderManagedCcbConfig({
     projectId: "project-1",
     projectRoot: "/repo",
+    topology: defaultTopology,
     existingConfigText: withTips.configText
   });
 
@@ -129,6 +142,7 @@ test("renderManagedCcbConfig detects user-edited three-slot core drift", () => {
   const result = renderManagedCcbConfig({
     projectId: "project-1",
     projectRoot: "/repo",
+    topology: defaultTopology,
     existingConfigText
   });
 
@@ -176,7 +190,8 @@ test("ensureManagedCcbConfig writes managed config and preserves allowed non-cor
 
   await ensureManagedCcbConfig({
     projectId: "project-1",
-    projectRoot: root
+    projectRoot: root,
+    topology: defaultTopology
   });
 
   const written = await readFile(configPath, "utf8");
@@ -191,6 +206,109 @@ test("ensureManagedCcbConfig writes managed config and preserves allowed non-cor
   const slot3Codex = agentBlock(written, "slot3_codex");
   assert.match(slot3Codex, /model = "gpt-5-codex"/);
   assert.doesNotMatch(slot3Codex, /startup_args/);
+});
+
+test("slotCount 4 topology expands signature and core lines to slot-4", () => {
+  const topology = projectSlotTopology(4);
+  const result = renderManagedCcbConfig({
+    projectId: "project-1",
+    projectRoot: "/repo",
+    topology
+  });
+
+  assert.match(result.configText, /^slot-4 = "slot4_claude:claude; slot4_codex:codex"$/m);
+  assert.match(result.configText, /^\[agents\.slot4_claude]$/m);
+  const coreLines = collectCoreLines(result.configText, topology);
+  assert.ok(coreLines.includes('slot-4 = "slot4_claude:claude; slot4_codex:codex"'));
+  assert.ok(coreLines.includes("[agents.slot4_claude]"));
+  assert.ok(coreLines.includes('provider = "claude"'));
+  assert.notEqual(
+    computeManagedCoreSignature(result.configText, topology),
+    computeManagedCoreSignature(result.configText, defaultTopology)
+  );
+});
+
+test("slot agent overrides inject into config and collect back from selected slots", () => {
+  const topology = projectSlotTopology(4);
+  const overridesJson = JSON.stringify({
+    main_claude: { model: '"ignored-main"' },
+    slot4_claude: {
+      model: '"sonnet"',
+      startup_args: '["--permission-mode", "acceptEdits"]',
+      provider: '"ignored-core"'
+    },
+    slot4_codex: { profile: '"reviewer"', log_level: '"debug"' }
+  });
+
+  const result = renderManagedCcbConfig({
+    projectId: "project-1",
+    projectRoot: "/repo",
+    topology,
+    slotAgentOverridesJson: overridesJson
+  });
+
+  const slot4Claude = agentBlock(result.configText, "slot4_claude");
+  assert.match(slot4Claude, /model = "sonnet"/);
+  assert.ok(slot4Claude.includes('startup_args = ["--permission-mode", "acceptEdits"]'));
+  assert.doesNotMatch(slot4Claude, /ignored-core/);
+  const slot4Codex = agentBlock(result.configText, "slot4_codex");
+  assert.match(slot4Codex, /profile = "reviewer"/);
+  assert.match(slot4Codex, /log_level = "debug"/);
+  assert.doesNotMatch(agentBlock(result.configText, "main_claude"), /ignored-main/);
+
+  const collectedJson = collectSlotAgentOverridesJson(result.configText, topology, ["slot-4"] as const);
+  assert.deepEqual(parseSlotAgentOverridesJson(collectedJson, topology), {
+    slot4_claude: {
+      model: '"sonnet"',
+      startup_args: '["--permission-mode", "acceptEdits"]'
+    },
+    slot4_codex: {
+      log_level: '"debug"',
+      profile: '"reviewer"'
+    }
+  });
+});
+
+test("ensureManagedCcbConfig serializes concurrent writes through the mutation lock", async () => {
+  const root = await projectRoot();
+  const lock = new ManagedConfigMutationLock();
+  let active = 0;
+  let maxActive = 0;
+  class ObservedMutationLock extends ManagedConfigMutationLock {
+    override async runExclusive<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+      return await lock.runExclusive(projectId, async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        try {
+          return await work();
+        } finally {
+          active -= 1;
+        }
+      });
+    }
+  }
+  const observedLock = new ObservedMutationLock();
+
+  await Promise.all([
+    ensureManagedCcbConfig({
+      projectId: "project-1",
+      projectRoot: root,
+      topology: defaultTopology,
+      mutationLock: observedLock
+    }),
+    ensureManagedCcbConfig({
+      projectId: "project-1",
+      projectRoot: root,
+      topology: defaultTopology,
+      sidebarViewTips: ["slot-1: queued"],
+      mutationLock: observedLock
+    })
+  ]);
+
+  assert.equal(maxActive, 1);
+  const written = await readFile(join(root, ".ccb", "ccb.config"), "utf8");
+  assert.match(written, /^\[agents\.slot3_codex]$/m);
 });
 
 function escapeRegExp(value: string): string {

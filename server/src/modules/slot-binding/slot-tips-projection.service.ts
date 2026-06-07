@@ -4,7 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 
 import { prisma } from "../../db/prisma.js";
 import { AttentionInboxService, type AttentionInboxServiceLike } from "../attention-inbox/attention-inbox.service.js";
-import { ensureManagedCcbConfig } from "../project-ccbd/managed-config.service.js";
+import { ensureManagedCcbConfig, projectSlotTopology } from "../project-ccbd/managed-config.service.js";
 
 const ACTIVE_TIP_STATES = ["bound", "busy", "unhealthy", "recovering"] as const;
 export const DEFAULT_SLOT_TIPS_SYNC_INTERVAL_MS = 30_000;
@@ -151,7 +151,7 @@ export async function syncSlotTips(
     try {
       const project = await client.project.findUnique({
         where: { id: projectId },
-        select: { localPath: true }
+        select: { localPath: true, slotCount: true, slotAgentOverridesJson: true }
       });
       if (!project) {
         return {
@@ -179,6 +179,8 @@ export async function syncSlotTips(
       await writeManagedConfig({
         projectId,
         projectRoot: project.localPath,
+        topology: projectSlotTopology(project.slotCount),
+        slotAgentOverridesJson: project.slotAgentOverridesJson,
         sidebarViewTips: tips
       });
       lastWrittenTipHashes.set(hashKey, nextHash);

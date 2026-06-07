@@ -12,6 +12,7 @@ import {
 import {
   ensureManagedCcbConfig,
   MANAGED_CCB_CONFIG_RELATIVE_PATH,
+  projectSlotTopology,
   renderManagedCcbConfig,
   type ManagedCcbConfigDrift
 } from "./managed-config.service.js";
@@ -59,6 +60,8 @@ type ProjectCcbdLogger = {
 type ProjectRecord = {
   id: string;
   localPath: string;
+  slotCount: number;
+  slotAgentOverridesJson: string | null;
 };
 
 type EvaluatedConfig = {
@@ -92,7 +95,7 @@ export class ProjectCcbdManager {
   async ensureStarted(projectId: string): Promise<ProjectCcbdRuntime> {
     const project = await this.client.project.findUniqueOrThrow({
       where: { id: projectId },
-      select: { id: true, localPath: true }
+      select: { id: true, localPath: true, slotCount: true, slotAgentOverridesJson: true }
     });
     const evaluated = await this.evaluateConfig(project);
     if (evaluated.status.startupBlocked) {
@@ -103,6 +106,8 @@ export class ProjectCcbdManager {
     const config = await ensureManagedCcbConfig({
       projectId: project.id,
       projectRoot: project.localPath,
+      topology: projectSlotTopology(project.slotCount),
+      slotAgentOverridesJson: project.slotAgentOverridesJson,
       existingConfigText: evaluated.existingConfigText,
       sidebarViewTips
     });
@@ -114,13 +119,15 @@ export class ProjectCcbdManager {
   async confirmRestore(projectId: string): Promise<{ runtime: ProjectCcbdRuntime; status: ProjectCcbdStatus }> {
     const project = await this.client.project.findUniqueOrThrow({
       where: { id: projectId },
-      select: { id: true, localPath: true }
+      select: { id: true, localPath: true, slotCount: true, slotAgentOverridesJson: true }
     });
     const evaluated = await this.evaluateConfig(project);
     const sidebarViewTips = await computeSlotTipsProjection(this.client, project.id);
     const config = await ensureManagedCcbConfig({
       projectId: project.id,
       projectRoot: project.localPath,
+      topology: projectSlotTopology(project.slotCount),
+      slotAgentOverridesJson: project.slotAgentOverridesJson,
       existingConfigText: evaluated.existingConfigText,
       sidebarViewTips
     });
@@ -156,7 +163,7 @@ export class ProjectCcbdManager {
   async getStatus(projectId: string): Promise<ProjectCcbdStatus> {
     const project = await this.client.project.findUniqueOrThrow({
       where: { id: projectId },
-      select: { id: true, localPath: true }
+      select: { id: true, localPath: true, slotCount: true, slotAgentOverridesJson: true }
     });
     return (await this.evaluateConfig(project)).status;
   }
@@ -175,6 +182,8 @@ export class ProjectCcbdManager {
     const renderResult = renderManagedCcbConfig({
       projectId: project.id,
       projectRoot: project.localPath,
+      topology: projectSlotTopology(project.slotCount),
+      slotAgentOverridesJson: project.slotAgentOverridesJson,
       existingConfigText
     });
     const status: ProjectCcbdStatus = {

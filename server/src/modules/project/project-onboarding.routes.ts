@@ -10,7 +10,11 @@ import {
   type NativeAnchorTerminalSpawnResult
 } from "../anchor-terminal/native-terminal.service.js";
 import { CcbdClientService } from "../ccbd-client/ccbd-client.service.js";
-import { buildManagedCcbConfig } from "../project-ccbd/managed-config.service.js";
+import {
+  buildManagedCcbConfig,
+  parseSlotAgentOverridesJson,
+  projectSlotTopology
+} from "../project-ccbd/managed-config.service.js";
 import { ProjectCcbdManager } from "../project-ccbd/project-ccbd-manager.js";
 
 type InitJobStatus = "queued" | "running" | "completed" | "failed";
@@ -26,12 +30,23 @@ const DOCS_STRUCTURE_CONTRACT_RELATIVE_PATH = join("docs", ".ccb", "docs-structu
 const DOC_MAP_RELATIVE_PATH = join("docs", "00_文档地图.md");
 const DOC_MAP_CACHE_RELATIVE_PATH = join("docs", ".ccb", "index", "document-map.json");
 
-const CCB_CONFIG_TEMPLATE = buildManagedCcbConfig();
+type ProjectLookup = {
+  id: string;
+  localPath: string;
+  slotCount: number;
+  slotAgentOverridesJson: string | null;
+};
 
-function buildManualSetupCommand(localPath: string): string {
+function buildManualSetupCommand(project: ProjectLookup): string {
+  const topology = projectSlotTopology(project.slotCount);
+  const configTemplate = buildManagedCcbConfig(
+    topology,
+    {},
+    { slotAgentOverrides: parseSlotAgentOverridesJson(project.slotAgentOverridesJson, topology) }
+  );
   return [
-    `cd ${localPath} && mkdir -p .ccb && cat > .ccb/ccb.config <<'EOF' && ccb`,
-    CCB_CONFIG_TEMPLATE.trimEnd(),
+    `cd ${project.localPath} && mkdir -p .ccb && cat > .ccb/ccb.config <<'EOF' && ccb`,
+    configTemplate.trimEnd(),
     `EOF`
   ].join("\n");
 }
@@ -50,10 +65,10 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function findProject(projectId: string): Promise<{ id: string; localPath: string } | null> {
+async function findProject(projectId: string): Promise<ProjectLookup | null> {
   return await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, localPath: true }
+    select: { id: true, localPath: true, slotCount: true, slotAgentOverridesJson: true }
   });
 }
 
@@ -258,7 +273,7 @@ export async function registerProjectOnboardingRoutes(
       knowledgeBaseReady,
       ccbConfigPath: paths.ccbConfigPath,
       knowledgeBaseRootPath: paths.knowledgeBaseRootPath,
-      manualCommand: buildManualSetupCommand(project.localPath),
+      manualCommand: buildManualSetupCommand(project),
       checkedAt: new Date().toISOString()
     };
   });

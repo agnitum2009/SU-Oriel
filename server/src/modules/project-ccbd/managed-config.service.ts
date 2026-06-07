@@ -2,28 +2,64 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
-export const MANAGED_WINDOW_NAMES = ["main", "slot-1", "slot-2", "slot-3"] as const;
-export const MANAGED_AGENT_NAMES = [
-  "main_claude",
-  "main_codex",
-  "slot1_claude",
-  "slot1_codex",
-  "slot2_claude",
-  "slot2_codex",
-  "slot3_claude",
-  "slot3_codex",
-] as const;
+import {
+  agentCore as deriveAgentCore,
+  agentNamesForSlot,
+  managedAgentNames as deriveManagedAgentNames,
+  managedWindowNames as deriveManagedWindowNames,
+  slotIds as deriveSlotIds,
+  type AgentCore,
+  type SlotId
+} from "../slot-topology/slot-topology.service.js";
+import {
+  defaultManagedConfigMutationLock,
+  type ManagedConfigMutationLock
+} from "./managed-config-mutation-lock.js";
+
+export const DEFAULT_PROJECT_SLOT_COUNT = 3;
+
+export type ManagedCcbConfigTopology = {
+  slotCount: number;
+  slotIds: readonly SlotId[];
+  windowNames: readonly string[];
+  agentNames: readonly string[];
+  agentCore: Record<string, AgentCore>;
+};
+
+export type ManagedAgentFields = Record<string, Record<string, string>>;
+
+export function projectSlotTopology(slotCount: number = DEFAULT_PROJECT_SLOT_COUNT): ManagedCcbConfigTopology {
+  return {
+    slotCount,
+    slotIds: deriveSlotIds(slotCount),
+    windowNames: deriveManagedWindowNames(slotCount),
+    agentNames: deriveManagedAgentNames(slotCount),
+    agentCore: deriveAgentCore(slotCount)
+  };
+}
+
+const DEFAULT_MANAGED_TOPOLOGY = projectSlotTopology(DEFAULT_PROJECT_SLOT_COUNT);
+
+export const MANAGED_WINDOW_NAMES = DEFAULT_MANAGED_TOPOLOGY.windowNames;
+export const MANAGED_AGENT_NAMES = DEFAULT_MANAGED_TOPOLOGY.agentNames;
 
 export const MANAGED_CCB_CONFIG_RELATIVE_PATH = join(".ccb", "ccb.config");
 
 export type ManagedCcbConfigRenderInput = {
   projectId: string;
   projectRoot: string;
+  topology: ManagedCcbConfigTopology;
   existingConfigText?: string | null;
+  slotAgentOverridesJson?: string | null;
   sidebarViewTips?: readonly string[] | null;
 };
 
+export type ManagedCcbConfigEnsureInput = ManagedCcbConfigRenderInput & {
+  mutationLock?: ManagedConfigMutationLock;
+};
+
 export type ManagedCcbConfigRenderOptions = {
+  slotAgentOverrides?: ManagedAgentFields;
   sidebarViewTips?: readonly string[] | null;
 };
 
@@ -37,24 +73,6 @@ export type ManagedCcbConfigRenderResult = {
   configText: string;
   coreSignature: string;
   drift: ManagedCcbConfigDrift | null;
-};
-
-type ManagedAgentName = (typeof MANAGED_AGENT_NAMES)[number];
-
-type AgentCore = {
-  provider: "claude" | "codex";
-  windowName: string;
-};
-
-const AGENT_CORE: Record<ManagedAgentName, AgentCore> = {
-  main_claude: { provider: "claude", windowName: "main" },
-  main_codex: { provider: "codex", windowName: "main" },
-  slot1_claude: { provider: "claude", windowName: "slot-1" },
-  slot1_codex: { provider: "codex", windowName: "slot-1" },
-  slot2_claude: { provider: "claude", windowName: "slot-2" },
-  slot2_codex: { provider: "codex", windowName: "slot-2" },
-  slot3_claude: { provider: "claude", windowName: "slot-3" },
-  slot3_codex: { provider: "codex", windowName: "slot-3" }
 };
 
 const CLAUDE_AGENT_DEFAULTS = {
@@ -72,8 +90,11 @@ const NON_CORE_AGENT_KEYS = new Set([
   "log_level"
 ]);
 
+const CORE_AGENT_KEYS = ["provider", "target", "workspace_mode", "runtime_mode", "restore", "permission", "queue_policy"];
+
 export function buildManagedCcbConfig(
-  preservedAgentFields: Record<string, Record<string, string>> = {},
+  topology: ManagedCcbConfigTopology,
+  preservedAgentFields: ManagedAgentFields = {},
   options: ManagedCcbConfigRenderOptions = {}
 ): string {
   const lines = [
@@ -82,9 +103,10 @@ export function buildManagedCcbConfig(
     "",
     "[windows]",
     'main = "main_claude:claude; main_codex:codex"',
-    'slot-1 = "slot1_claude:claude; slot1_codex:codex"',
-    'slot-2 = "slot2_claude:claude; slot2_codex:codex"',
-    'slot-3 = "slot3_claude:claude; slot3_codex:codex"',
+    ...topology.slotIds.map((slotId) => {
+      const [claudeAgentName, codexAgentName] = agentNamesForSlot(slotId);
+      return `${slotId} = "${claudeAgentName}:claude; ${codexAgentName}:codex"`;
+    }),
     "",
     "[ui.sidebar]",
     'mode = "every_window"',
@@ -97,8 +119,10 @@ export function buildManagedCcbConfig(
     lines.push("[ui.sidebar.view]", "tips_enabled = true", ...renderTomlStringArray("tips", options.sidebarViewTips), "");
   }
 
-  for (const agentName of MANAGED_AGENT_NAMES) {
-    const core = AGENT_CORE[agentName];
+  const slotAgentOverrides = options.slotAgentOverrides ?? {};
+  for (const agentName of topology.agentNames) {
+    const core = topology.agentCore[agentName];
+    if (!core) continue;
     lines.push(
       `[agents.${agentName}]`,
       `provider = "${core.provider}"`,
@@ -110,10 +134,13 @@ export function buildManagedCcbConfig(
       'queue_policy = "serial-per-agent"'
     );
     const preserved = preservedAgentFields[agentName] ?? {};
+    const overrides = slotAgentOverrides[agentName] ?? {};
     const agentDefaults = core.provider === "claude" ? CLAUDE_AGENT_DEFAULTS : {};
-    const nonCoreFields = { ...agentDefaults, ...preserved };
+    const nonCoreFields = { ...agentDefaults, ...overrides, ...preserved };
     for (const [key, value] of Object.entries(nonCoreFields)) {
-      lines.push(`${key} = ${value}`);
+      if (NON_CORE_AGENT_KEYS.has(key)) {
+        lines.push(`${key} = ${value}`);
+      }
     }
     lines.push("");
   }
@@ -122,9 +149,13 @@ export function buildManagedCcbConfig(
 }
 
 export function renderManagedCcbConfig(input: ManagedCcbConfigRenderInput): ManagedCcbConfigRenderResult {
-  const preserved = collectPreservedAgentFields(input.existingConfigText ?? "");
-  const configText = buildManagedCcbConfig(preserved, { sidebarViewTips: input.sidebarViewTips });
-  const coreSignature = computeManagedCoreSignature(configText);
+  const preserved = collectPreservedAgentFields(input.existingConfigText ?? "", input.topology);
+  const slotAgentOverrides = parseSlotAgentOverridesJson(input.slotAgentOverridesJson, input.topology);
+  const configText = buildManagedCcbConfig(input.topology, preserved, {
+    slotAgentOverrides,
+    sidebarViewTips: input.sidebarViewTips
+  });
+  const coreSignature = computeManagedCoreSignature(configText, input.topology);
   const existingText = input.existingConfigText?.trim() ? input.existingConfigText : null;
 
   if (!existingText) {
@@ -139,7 +170,7 @@ export function renderManagedCcbConfig(input: ManagedCcbConfigRenderInput): Mana
     };
   }
 
-  const existingSignature = computeManagedCoreSignature(existingText);
+  const existingSignature = computeManagedCoreSignature(existingText, input.topology);
   if (existingSignature === coreSignature) {
     return {
       configText,
@@ -154,54 +185,52 @@ export function renderManagedCcbConfig(input: ManagedCcbConfigRenderInput): Mana
     coreSignature,
     drift: {
       kind,
-      diff: buildCoreDiff(existingText, configText),
+      diff: buildCoreDiff(existingText, configText, input.topology),
       requiresUserConfirmation: true
     }
   };
 }
 
-export async function ensureManagedCcbConfig(input: ManagedCcbConfigRenderInput): Promise<ManagedCcbConfigRenderResult> {
-  const configPath = join(input.projectRoot, MANAGED_CCB_CONFIG_RELATIVE_PATH);
-  const existingConfigText = input.existingConfigText ?? await readFile(configPath, "utf8").catch(() => null);
-  const result = renderManagedCcbConfig({
-    ...input,
-    existingConfigText
+export async function ensureManagedCcbConfig(input: ManagedCcbConfigEnsureInput): Promise<ManagedCcbConfigRenderResult> {
+  const mutationLock = input.mutationLock ?? defaultManagedConfigMutationLock;
+  return await mutationLock.runExclusive(input.projectId, async () => {
+    const configPath = join(input.projectRoot, MANAGED_CCB_CONFIG_RELATIVE_PATH);
+    const existingConfigText = input.existingConfigText ?? await readFile(configPath, "utf8").catch(() => null);
+    const result = renderManagedCcbConfig({
+      projectId: input.projectId,
+      projectRoot: input.projectRoot,
+      topology: input.topology,
+      existingConfigText,
+      slotAgentOverridesJson: input.slotAgentOverridesJson,
+      sidebarViewTips: input.sidebarViewTips
+    });
+
+    const configDir = join(input.projectRoot, ".ccb");
+    const tempPath = join(configDir, `.ccb.config.${process.pid}.${randomUUID()}.tmp`);
+    await mkdir(configDir, { recursive: true });
+    try {
+      await writeFile(tempPath, result.configText, "utf8");
+      await rename(tempPath, configPath);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    return result;
   });
-
-  const configDir = join(input.projectRoot, ".ccb");
-  const tempPath = join(configDir, `.ccb.config.${process.pid}.${randomUUID()}.tmp`);
-  await mkdir(configDir, { recursive: true });
-  try {
-    await writeFile(tempPath, result.configText, "utf8");
-    await rename(tempPath, configPath);
-  } catch (error) {
-    await rm(tempPath, { force: true }).catch(() => undefined);
-    throw error;
-  }
-  return result;
 }
 
-function renderTomlStringArray(key: string, values: readonly string[]): string[] {
-  if (values.length === 0) {
-    return [`${key} = []`];
-  }
-  return [
-    `${key} = [`,
-    ...values.map((value) => `  ${JSON.stringify(value)},`),
-    "]"
-  ];
-}
-
-function computeManagedCoreSignature(configText: string): string {
-  const coreLines = collectCoreLines(configText);
+export function computeManagedCoreSignature(configText: string, topology: ManagedCcbConfigTopology): string {
+  const coreLines = collectCoreLines(configText, topology);
   return createHash("sha256").update(coreLines.join("\n"), "utf8").digest("hex");
 }
 
-function collectCoreLines(configText: string): string[] {
+export function collectCoreLines(configText: string, topology: ManagedCcbConfigTopology): string[] {
   const lines = configText.split(/\r?\n/);
   const coreLines: string[] = [];
   let section = "";
   let currentAgent = "";
+  const managedWindows = new Set(topology.windowNames);
+  const managedAgents = new Set(topology.agentNames);
 
   for (const rawLine of lines) {
     const line = stripInlineComment(rawLine).trim();
@@ -215,7 +244,7 @@ function collectCoreLines(configText: string): string[] {
       if (agentMatch?.[1]) {
         currentAgent = agentMatch[1];
       }
-      if (section === "windows" || section === "ui.sidebar" || MANAGED_AGENT_NAMES.includes(currentAgent as ManagedAgentName)) {
+      if (section === "windows" || section === "ui.sidebar" || managedAgents.has(currentAgent)) {
         coreLines.push(`[${section}]`);
       }
       continue;
@@ -227,7 +256,7 @@ function collectCoreLines(configText: string): string[] {
       coreLines.push(normalizeAssignment(line));
       continue;
     }
-    if (section === "windows" && MANAGED_WINDOW_NAMES.includes(key as typeof MANAGED_WINDOW_NAMES[number])) {
+    if (section === "windows" && managedWindows.has(key)) {
       coreLines.push(normalizeAssignment(line));
       continue;
     }
@@ -235,11 +264,7 @@ function collectCoreLines(configText: string): string[] {
       coreLines.push(normalizeAssignment(line));
       continue;
     }
-    if (
-      currentAgent &&
-      MANAGED_AGENT_NAMES.includes(currentAgent as ManagedAgentName) &&
-      ["provider", "target", "workspace_mode", "runtime_mode", "restore", "permission", "queue_policy"].includes(key)
-    ) {
+    if (currentAgent && managedAgents.has(currentAgent) && CORE_AGENT_KEYS.includes(key)) {
       coreLines.push(normalizeAssignment(line));
     }
   }
@@ -247,8 +272,9 @@ function collectCoreLines(configText: string): string[] {
   return coreLines;
 }
 
-function collectPreservedAgentFields(configText: string): Record<string, Record<string, string>> {
-  const preserved: Record<string, Record<string, string>> = {};
+export function collectPreservedAgentFields(configText: string, topology: ManagedCcbConfigTopology): ManagedAgentFields {
+  const preserved: ManagedAgentFields = {};
+  const managedAgents = new Set(topology.agentNames);
   let currentAgent = "";
   for (const rawLine of configText.split(/\r?\n/)) {
     const line = stripInlineComment(rawLine).trim();
@@ -257,7 +283,7 @@ function collectPreservedAgentFields(configText: string): Record<string, Record<
       currentAgent = sectionMatch[1];
       continue;
     }
-    if (!currentAgent || !MANAGED_AGENT_NAMES.includes(currentAgent as ManagedAgentName)) {
+    if (!currentAgent || !managedAgents.has(currentAgent)) {
       continue;
     }
     const assignment = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
@@ -271,9 +297,69 @@ function collectPreservedAgentFields(configText: string): Record<string, Record<
   return preserved;
 }
 
-function buildCoreDiff(existingText: string, managedText: string): string {
-  const existing = new Set(collectCoreLines(existingText));
-  const managed = new Set(collectCoreLines(managedText));
+export function parseSlotAgentOverridesJson(
+  rawJson: string | null | undefined,
+  topology: ManagedCcbConfigTopology
+): ManagedAgentFields {
+  if (!rawJson?.trim()) {
+    return {};
+  }
+
+  const parsed = JSON.parse(rawJson) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+
+  const slotAgentNames = new Set(topology.slotIds.flatMap((slotId) => [...agentNamesForSlot(slotId)]));
+  return sanitizeAgentFields(parsed as Record<string, unknown>, slotAgentNames);
+}
+
+export function collectSlotAgentOverridesJson(
+  configText: string,
+  topology: ManagedCcbConfigTopology,
+  slotIdsToCollect: readonly SlotId[] = topology.slotIds
+): string | null {
+  const preserved = collectPreservedAgentFields(configText, topology);
+  const slotAgentNames = new Set(slotIdsToCollect.flatMap((slotId) => [...agentNamesForSlot(slotId)]));
+  const collected = sanitizeAgentFields(preserved, slotAgentNames);
+  return Object.keys(collected).length > 0 ? JSON.stringify(collected) : null;
+}
+
+function renderTomlStringArray(key: string, values: readonly string[]): string[] {
+  if (values.length === 0) {
+    return [`${key} = []`];
+  }
+  return [
+    `${key} = [`,
+    ...values.map((value) => `  ${JSON.stringify(value)},`),
+    "]"
+  ];
+}
+
+function sanitizeAgentFields(input: Record<string, unknown>, allowedAgentNames: ReadonlySet<string>): ManagedAgentFields {
+  const sanitized: ManagedAgentFields = {};
+  for (const agentName of Object.keys(input).sort()) {
+    if (!allowedAgentNames.has(agentName)) {
+      continue;
+    }
+    const fields = input[agentName];
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+      continue;
+    }
+    for (const key of Object.keys(fields as Record<string, unknown>).sort()) {
+      const value = (fields as Record<string, unknown>)[key];
+      if (NON_CORE_AGENT_KEYS.has(key) && typeof value === "string") {
+        sanitized[agentName] ??= {};
+        sanitized[agentName][key] = value.trim();
+      }
+    }
+  }
+  return sanitized;
+}
+
+function buildCoreDiff(existingText: string, managedText: string, topology: ManagedCcbConfigTopology): string {
+  const existing = new Set(collectCoreLines(existingText, topology));
+  const managed = new Set(collectCoreLines(managedText, topology));
   const missing = [...managed].filter((line) => !existing.has(line)).map((line) => `+ ${line}`);
   const extra = [...existing].filter((line) => !managed.has(line)).map((line) => `- ${line}`);
   return [...missing, ...extra].join("\n");
