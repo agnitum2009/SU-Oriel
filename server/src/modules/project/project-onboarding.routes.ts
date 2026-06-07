@@ -38,7 +38,7 @@ function buildManualSetupCommand(localPath: string): string {
 
 export interface ProjectOnboardingRouteDependencies {
   nativeTerminal?: MainProjectTerminal;
-  projectCcbdManager?: Pick<ProjectCcbdManager, "getStatus" | "confirmRestore">;
+  projectCcbdManager?: Pick<ProjectCcbdManager, "getStatus" | "confirmRestore"> & Partial<Pick<ProjectCcbdManager, "dispose">>;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -232,6 +232,10 @@ export async function registerProjectOnboardingRoutes(
 ): Promise<void> {
   const nativeTerminal = dependencies.nativeTerminal ?? createMainProjectTerminal();
   const projectCcbdManager = dependencies.projectCcbdManager ?? new ProjectCcbdManager(prisma);
+
+  app.addHook("onClose", async () => {
+    projectCcbdManager.dispose?.();
+  });
 
   app.get("/api/projects/:projectId/onboarding-status", async (request, reply) => {
     const { projectId } = request.params as { projectId: string };

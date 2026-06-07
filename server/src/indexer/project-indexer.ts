@@ -99,6 +99,11 @@ export interface StartProjectScanResult {
   job: ProjectScanJobView | null;
 }
 
+export type PluginJournalWatermarkCheckResult =
+  | { status: "missing" | "empty"; journalPath: string }
+  | { status: "invalid"; journalPath: string; issue: Record<string, unknown> }
+  | { status: "current" | "lagging"; journalPath: string; eventId: string; line: number };
+
 interface ScanProjectOptions {
   scanJobId?: string;
   markScanning?: boolean;
@@ -1793,6 +1798,64 @@ async function syncPluginEventJournal(
   }
 
   return { projectedCount, issues };
+}
+
+export async function checkPluginJournalWatermark(
+  prisma: Pick<PrismaClient, "eventJournal">,
+  projectId: string,
+  projectRoot: string
+): Promise<PluginJournalWatermarkCheckResult> {
+  const journalPath = join(
+    projectRoot,
+    getDocsStructureResolverForProject(projectRoot).resolveMachineLayerPath("eventJournal")
+  );
+  if (!existsSync(journalPath)) {
+    return { status: "missing", journalPath };
+  }
+
+  const content = await readFile(journalPath, "utf8");
+  const lines = content.split(/\r?\n/);
+  let watermark: { eventId: string; line: number } | null = null;
+
+  for (const [index, line] of lines.entries()) {
+    const rawLine = line.trim();
+    if (!rawLine) {
+      continue;
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(rawLine) as Record<string, unknown>;
+    } catch (error) {
+      return {
+        status: "invalid",
+        journalPath,
+        issue: {
+          line: index + 1,
+          issue: error instanceof Error ? error.message : "invalid JSON"
+        }
+      };
+    }
+
+    const normalized = normalizePluginJournalEvent(parsed, rawLine, index + 1);
+    if (!normalized.ok) {
+      return { status: "invalid", journalPath, issue: normalized.issue };
+    }
+    watermark = { eventId: normalized.event.eventId, line: index + 1 };
+  }
+
+  if (!watermark) {
+    return { status: "empty", journalPath };
+  }
+
+  const row = await prisma.eventJournal.findUnique({
+    where: { eventId: watermark.eventId },
+    select: { id: true, projectId: true }
+  });
+  if (row?.projectId === projectId) {
+    return { status: "current", journalPath, eventId: watermark.eventId, line: watermark.line };
+  }
+  return { status: "lagging", journalPath, eventId: watermark.eventId, line: watermark.line };
 }
 
 async function resolvePluginJournalAnchorId(

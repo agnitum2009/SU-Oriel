@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 const SIDEBAR_COLLAPSED_KEY = "ccb-console:sidebar-collapsed";
+const NOTIFICATION_SETTINGS_KEY = "ccb-console:notification-settings";
 
 function loadSidebarCollapsed(): boolean {
   try {
@@ -13,6 +14,35 @@ function loadSidebarCollapsed(): boolean {
 function saveSidebarCollapsed(value: boolean) {
   try {
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
+interface NotificationSettings {
+  browserEnabled: boolean;
+  soundEnabled: boolean;
+}
+
+function loadNotificationSettings(): NotificationSettings {
+  try {
+    const raw = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
+    if (!raw) {
+      return { browserEnabled: true, soundEnabled: true };
+    }
+    const parsed = JSON.parse(raw) as Partial<NotificationSettings>;
+    return {
+      browserEnabled: parsed.browserEnabled !== false,
+      soundEnabled: parsed.soundEnabled !== false
+    };
+  } catch {
+    return { browserEnabled: true, soundEnabled: true };
+  }
+}
+
+function saveNotificationSettings(value: NotificationSettings) {
+  try {
+    localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify(value));
   } catch {
     // ignore
   }
@@ -32,6 +62,8 @@ interface UIStore {
   modalType: "create-project" | "create-requirement" | "ai-cli-settings" | null;
   toasts: ToastItem[];
   anchorResetEpochs: Record<string, number>;
+  notificationSettings: NotificationSettings;
+  attentionUnreadCount: number;
   toggleSidebar: () => void;
   openTaskPanel: (taskId: string) => void;
   closeSlidePanel: () => void;
@@ -40,6 +72,8 @@ interface UIStore {
   addToast: (type: ToastItem["type"], message: string) => void;
   removeToast: (id: string) => void;
   bumpAnchorResetEpoch: (taskId: string) => void;
+  updateNotificationSettings: (patch: Partial<NotificationSettings>) => void;
+  setAttentionUnreadCount: (count: number) => void;
 }
 
 export const useUIStore = create<UIStore>()((set) => ({
@@ -50,6 +84,8 @@ export const useUIStore = create<UIStore>()((set) => ({
   modalType: null,
   toasts: [],
   anchorResetEpochs: {},
+  notificationSettings: loadNotificationSettings(),
+  attentionUnreadCount: 0,
   toggleSidebar: () => {
     set((state) => {
       const next = !state.sidebarCollapsed;
@@ -99,5 +135,15 @@ export const useUIStore = create<UIStore>()((set) => ({
         [taskId]: (state.anchorResetEpochs[taskId] ?? 0) + 1
       }
     }));
+  },
+  updateNotificationSettings: (patch) => {
+    set((state) => {
+      const next = { ...state.notificationSettings, ...patch };
+      saveNotificationSettings(next);
+      return { notificationSettings: next };
+    });
+  },
+  setAttentionUnreadCount: (count) => {
+    set({ attentionUnreadCount: Math.max(0, count) });
   }
 }));

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildApiUrl,
+  ackAttention,
   cancelReviewIntent,
   cleanupTaskWorkspace,
   consumeReviewIntent,
@@ -10,6 +11,8 @@ import {
   createTaskWorkspace,
   dispatchRequirementAnchorCommand,
   dispatchTaskAnchorCommand,
+  fetchAttention,
+  fetchAttentionSettings,
   fetchProjectInitJobStatus,
   fetchProjectOnboardingStatus,
   fetchTaskTimeline,
@@ -18,6 +21,7 @@ import {
   reindexRequirement,
   scanProject,
   startRequirementPlanningAnchor,
+  updateAttentionSettings,
   uploadRequirementAsset
 } from "../lib/console-api.js";
 
@@ -48,6 +52,61 @@ describe("console-api 真实联调行为", () => {
 
   it("可为独立部署场景拼接显式 API 基础地址", () => {
     expect(buildApiUrl("/api/projects", "http://127.0.0.1:3030/")).toBe("http://127.0.0.1:3030/api/projects");
+  });
+
+  it("attention client 使用项目级 list / ack / settings 端点", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ project_id: "p1", items: [], count: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        project_id: "p1",
+        ref: "event_journal:e1",
+        acked_at: "2026-06-06T12:00:00.000Z"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        project_id: "p1",
+        dnd_until: null,
+        updated_at: null
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        project_id: "p1",
+        dnd_until: "2026-06-06T13:00:00.000Z",
+        updated_at: "2026-06-06T12:00:00.000Z"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAttention("p1");
+    await ackAttention("p1", "event_journal:e1");
+    await fetchAttentionSettings("p1");
+    await updateAttentionSettings("p1", { dnd_until: "2026-06-06T13:00:00.000Z" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/p1/attention");
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/p1/attention/ack", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ ref: "event_journal:e1" })
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/projects/p1/attention/settings");
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/projects/p1/attention/settings", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ dnd_until: "2026-06-06T13:00:00.000Z" })
+    });
   });
 
   it("扫描失败时优先透传后端返回的 message", async () => {

@@ -14,6 +14,8 @@ import { CommandPalette, type CommandPaletteItem } from "./components/command-pa
 import { HotkeysHelp } from "./components/keyboard/HotkeysHelp.js";
 import { AppShell } from "./components/layout/AppShell.js";
 import { MainTerminalLauncher } from "./components/main-terminal/MainTerminalLauncher.js";
+import { NotificationBell } from "./components/notifications/NotificationBell.js";
+import { NotificationManager } from "./components/notifications/NotificationManager.js";
 import { PageHeader } from "./components/layout/PageHeader.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
 import { ProjectScanProgressBar } from "./components/projects/ProjectScanProgressBar.js";
@@ -142,7 +144,7 @@ function ConsoleLayout() {
   }, [hasSelectedProject, selectedProjectId, silentRefreshProjects, loadProjectData]);
 
   const pageTitle = getPageTitle(location.pathname);
-  const headerActions = getHeaderActions({
+  const pageHeaderActions = getHeaderActions({
     pathname: location.pathname,
     hasProject: hasSelectedProject,
     onScan: async () => {
@@ -155,6 +157,12 @@ function ConsoleLayout() {
     },
     onCreateRequirement: () => openModal("create-requirement")
   });
+  const headerActions = hasSelectedProject ? (
+    <>
+      <NotificationBell projectId={selectedProjectId} />
+      {pageHeaderActions}
+    </>
+  ) : pageHeaderActions;
 
   const projectFormValid =
     projectForm.name.trim().length > 0 &&
@@ -445,6 +453,7 @@ function ConsoleLayout() {
       }
       sidebarCollapsed={sidebarCollapsed}
     >
+      <NotificationManager projectId={selectedProjectId} />
       <Outlet />
 
       <Modal

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { prisma } from "../../db/prisma.js";
 import type { CcbdLauncherService } from "../anchor-lifecycle/ccbd-launcher.service.js";
+import { defaultSlotTipsPeriodicSyncService } from "../slot-binding/slot-tips-projection.service.js";
 import { ProjectCcbdConfigDriftError, ProjectCcbdManager } from "./project-ccbd-manager.js";
 
 const tmpRoots: string[] = [];
@@ -46,6 +47,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  defaultSlotTipsPeriodicSyncService.dispose();
   await resetDatabase();
   await Promise.all(tmpRoots.map((root) => rm(root, { recursive: true, force: true })));
   tmpRoots.length = 0;
@@ -92,6 +94,24 @@ test("ProjectCcbdManager reconciles sidebar tips from current slot bindings on s
   const config = await readFile(join(root, ".ccb", "ccb.config"), "utf8");
   assert.match(config, /^\[ui\.sidebar\.view]$/m);
   assert.match(config, /"slot-1: Startup Requirement"/);
+});
+
+test("ProjectCcbdManager starts periodic slot tips sync on start and clears it on stop", async () => {
+  const { projectId } = await createProjectWithRoot();
+  const periodic = {
+    start: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn()
+  };
+  const manager = new ProjectCcbdManager(prisma, launcher(), periodic);
+
+  await manager.ensureStarted(projectId);
+  await manager.stop(projectId);
+
+  assert.equal(periodic.start.mock.calls.length, 1);
+  assert.equal(periodic.start.mock.calls[0]?.[0], projectId);
+  assert.equal(periodic.start.mock.calls[0]?.[1]?.client, prisma);
+  assert.deepEqual(periodic.stop.mock.calls, [[projectId]]);
 });
 
 test("ProjectCcbdManager blocks startup on managed core drift and exposes drift status without rewriting config", async () => {

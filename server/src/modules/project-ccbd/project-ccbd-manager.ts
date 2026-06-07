@@ -5,7 +5,10 @@ import type { PrismaClient } from "@prisma/client";
 
 import { prisma } from "../../db/prisma.js";
 import { CcbdLauncherService, type CcbdLaunchResult } from "../anchor-lifecycle/ccbd-launcher.service.js";
-import { computeSlotTipsProjection } from "../slot-binding/slot-tips-projection.service.js";
+import {
+  computeSlotTipsProjection,
+  defaultSlotTipsPeriodicSyncService
+} from "../slot-binding/slot-tips-projection.service.js";
 import {
   ensureManagedCcbConfig,
   MANAGED_CCB_CONFIG_RELATIVE_PATH,
@@ -63,6 +66,12 @@ type EvaluatedConfig = {
   existingConfigText: string | null;
 };
 
+export type SlotTipsPeriodicSyncLifecycle = {
+  start(projectId: string, options?: { client?: PrismaClient; logger?: ProjectCcbdLogger }): void;
+  stop(projectId: string): void;
+  dispose(): void;
+};
+
 export class ProjectCcbdConfigDriftError extends Error {
   readonly status: ProjectCcbdStatus;
 
@@ -76,7 +85,8 @@ export class ProjectCcbdConfigDriftError extends Error {
 export class ProjectCcbdManager {
   constructor(
     private readonly client: PrismaClient = prisma,
-    private readonly launcher = new CcbdLauncherService()
+    private readonly launcher = new CcbdLauncherService(),
+    private readonly slotTipsPeriodicSync: SlotTipsPeriodicSyncLifecycle = defaultSlotTipsPeriodicSyncService
   ) {}
 
   async ensureStarted(projectId: string): Promise<ProjectCcbdRuntime> {
@@ -97,6 +107,7 @@ export class ProjectCcbdManager {
       sidebarViewTips
     });
     const launch = await this.launcher.start(project.localPath);
+    this.slotTipsPeriodicSync.start(project.id, { client: this.client });
     return toRuntime(project.id, project.localPath, config.coreSignature, launch);
   }
 
@@ -114,6 +125,7 @@ export class ProjectCcbdManager {
       sidebarViewTips
     });
     const launch = await this.launcher.start(project.localPath);
+    this.slotTipsPeriodicSync.start(project.id, { client: this.client });
     const runtime = toRuntime(project.id, project.localPath, config.coreSignature, launch);
     const status = await this.getStatus(project.id);
     return { runtime, status };
@@ -124,8 +136,17 @@ export class ProjectCcbdManager {
       where: { id: projectId },
       select: { localPath: true }
     });
-    if (!project) return;
-    await this.launcher.kill(project.localPath);
+    try {
+      if (project) {
+        await this.launcher.kill(project.localPath);
+      }
+    } finally {
+      this.slotTipsPeriodicSync.stop(projectId);
+    }
+  }
+
+  dispose(): void {
+    this.slotTipsPeriodicSync.dispose();
   }
 
   async recoverOnStartup(projectId: string): Promise<ProjectCcbdRuntime> {
