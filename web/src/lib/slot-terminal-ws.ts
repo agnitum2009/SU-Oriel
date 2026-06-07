@@ -2,9 +2,9 @@ import { resolveApiBaseUrl } from "./console-api.js";
 import {
   parseSlotTerminalServerFrame,
   type SlotTerminalClientFrame,
+  type SlotTerminalFrame,
   type SlotTerminalPaneRole,
   type SlotTerminalReadyDescriptor,
-  type SlotTerminalSnapshotFrame,
   type SlotTerminalTarget
 } from "../types/slot-terminal.js";
 
@@ -14,7 +14,7 @@ export type SlotTerminalClientStatus = "connecting" | "open" | "closed" | "error
 
 export interface SlotTerminalClientCallbacks {
   onReady?: (descriptor: SlotTerminalReadyDescriptor) => void;
-  onFrame?: (frame: SlotTerminalSnapshotFrame) => void;
+  onFrame?: (frame: SlotTerminalFrame) => void;
   onError?: (code: string, message: string) => void;
   onStatusChange?: (status: SlotTerminalClientStatus) => void;
 }

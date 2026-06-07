@@ -9,6 +9,8 @@ export interface UseXtermTerminalOptions {
   onInput: (data: string) => void;
 }
 
+export const SLOT_TERMINAL_SCROLLBACK = 2_500;
+
 export function useXtermTerminal(options: UseXtermTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef(options.onInput);
@@ -27,7 +29,7 @@ export function useXtermTerminal(options: UseXtermTerminalOptions) {
       fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Consolas', 'Menlo', monospace",
       cursorBlink: true,
-      scrollback: 1_000,
+      scrollback: SLOT_TERMINAL_SCROLLBACK,
       allowProposedApi: true,
       theme: {
         background: "#0b1020",

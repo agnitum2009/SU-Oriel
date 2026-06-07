@@ -19,6 +19,7 @@ const xtermMocks = vi.hoisted(() => {
     dispose = vi.fn();
     loadAddon = vi.fn();
     open = vi.fn();
+    reset = vi.fn();
     resize = vi.fn();
     scrollToBottom = vi.fn();
     write = vi.fn((_data: string, callback?: () => void) => callback?.());

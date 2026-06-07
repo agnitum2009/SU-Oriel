@@ -6,13 +6,19 @@ import {
   parseSlotTerminalServerFrame,
   SLOT_TERMINAL_CLIENT_FRAME_TYPES,
   type SlotTerminalDescriptor,
+  type SlotTerminalFrame,
   type SlotTerminalReadyDescriptor
 } from "../../types/slot-terminal.js";
+import {
+  slotTerminalProtocolFixtureFrames,
+  slotTerminalProtocolFixtureSequence
+} from "../../types/slot-terminal-fixtures.js";
 import {
   SLOT_TERMINAL_FULL_FRAME_CLEAR,
   SlotTerminalFrameRenderer,
   type SlotTerminalWritableTerminal
 } from "./SlotTerminalFrameRenderer.js";
+import { SLOT_TERMINAL_SCROLLBACK } from "./useXtermTerminal.js";
 
 class MockSlotTerminalWebSocket implements SlotTerminalWebSocketLike {
   static instances: MockSlotTerminalWebSocket[] = [];
@@ -62,21 +68,45 @@ class MockSlotTerminalWebSocket implements SlotTerminalWebSocketLike {
 
 class FakeTerminal implements SlotTerminalWritableTerminal {
   buffer?: SlotTerminalWritableTerminal["buffer"];
+  operations: string[] = [];
+  private readonly deferredWrites: boolean;
+  private readonly pendingWriteCallbacks: Array<() => void> = [];
   resizes: Array<{ cols: number; rows: number }> = [];
+  resetCalls = 0;
   scrollToBottomCalls = 0;
   writes: string[] = [];
 
+  constructor(options: { deferredWrites?: boolean } = {}) {
+    this.deferredWrites = options.deferredWrites ?? false;
+  }
+
+  reset(): void {
+    this.resetCalls += 1;
+    this.operations.push("reset");
+  }
+
   resize(cols: number, rows: number): void {
     this.resizes.push({ cols, rows });
+    this.operations.push(`resize:${cols}x${rows}`);
   }
 
   scrollToBottom(): void {
     this.scrollToBottomCalls += 1;
+    this.operations.push("scrollToBottom");
   }
 
   write(data: string, callback?: () => void): void {
     this.writes.push(data);
+    this.operations.push(`write:${data}`);
+    if (this.deferredWrites) {
+      this.pendingWriteCallbacks.push(() => callback?.());
+      return;
+    }
     callback?.();
+  }
+
+  flushNextWrite(): void {
+    this.pendingWriteCallbacks.shift()?.();
   }
 }
 
@@ -122,7 +152,7 @@ afterEach(() => {
 });
 
 describe("slot-terminal protocol contract", () => {
-  it("accepts pr2/pr3 ready and full-frame snapshots", () => {
+  it("accepts pr2/pr3 ready and snapshot/stream/reset frame fixtures", () => {
     expect(parseSlotTerminalServerFrame(JSON.stringify({ type: "ready", descriptor: readyDescriptor }))).toEqual({
       type: "ready",
       descriptor: readyDescriptor
@@ -131,25 +161,10 @@ describe("slot-terminal protocol contract", () => {
       type: "ready",
       descriptor: agentGroupReadyDescriptor
     });
-    expect(
-      parseSlotTerminalServerFrame(
-        JSON.stringify({
-          type: "frame",
-          data: "\u001b[32m中文 frame\u001b[0m\n",
-          cols: 4,
-          rows: 1,
-          generation: 2,
-          initial: false
-        })
-      )
-    ).toEqual({
-      type: "frame",
-      data: "\u001b[32m中文 frame\u001b[0m\n",
-      cols: 4,
-      rows: 1,
-      generation: 2,
-      initial: false
-    });
+    for (const frame of slotTerminalProtocolFixtureSequence) {
+      expect(parseSlotTerminalServerFrame(JSON.stringify(frame))).toEqual(frame);
+    }
+    expect(parseSlotTerminalServerFrame(JSON.stringify({ type: "frame", kind: "unknown", data: "nope" }))).toBeNull();
   });
 
   it("keeps forbidden writer/viewport commands out of the client contract", () => {
@@ -166,6 +181,10 @@ describe("slot-terminal protocol contract", () => {
     expect(SLOT_TERMINAL_CLIENT_FRAME_TYPES).not.toContain("resize");
     expect(SLOT_TERMINAL_CLIENT_FRAME_TYPES).not.toContain("request_write");
     expect(SLOT_TERMINAL_CLIENT_FRAME_TYPES).not.toContain("release_write");
+  });
+
+  it("keeps the slot terminal scrollback cap in one adjustable constant", () => {
+    expect(SLOT_TERMINAL_SCROLLBACK).toBe(2_500);
   });
 });
 
@@ -218,9 +237,73 @@ describe("slot-terminal mock websocket substrate", () => {
       { cols: 80, rows: 24 },
       { cols: 100, rows: 30 }
     ]);
+    expect(terminal.resetCalls).toBe(1);
     expect(terminal.writes).toEqual(["中文", `${SLOT_TERMINAL_FULL_FRAME_CLEAR}中文`]);
     expect(socket.sentFrames().some((frame) => frame.type === "resize")).toBe(false);
     client.close();
+  });
+
+  it("dispatches stream and reset frames through websocket callbacks", () => {
+    const frames: SlotTerminalFrame[] = [];
+    const client = createSlotTerminalClient({
+      target: { kind: "requirement", projectId: "project-1", requirementId: "req-1" },
+      pane: "claude",
+      webSocketFactory: MockSlotTerminalWebSocket,
+      callbacks: {
+        onFrame: (frame) => frames.push(frame)
+      }
+    });
+    const socket = MockSlotTerminalWebSocket.instances[0];
+    socket.open();
+
+    socket.serverSend(slotTerminalProtocolFixtureFrames.streamChunkA);
+    socket.serverSend(slotTerminalProtocolFixtureFrames.reset);
+
+    expect(frames).toEqual([
+      slotTerminalProtocolFixtureFrames.streamChunkA,
+      slotTerminalProtocolFixtureFrames.reset
+    ]);
+    client.close();
+  });
+
+  it("writes same-tick stream chunks in order without RAF coalescing", () => {
+    const terminal = new FakeTerminal({ deferredWrites: true });
+    const renderer = new SlotTerminalFrameRenderer(terminal);
+    const requestAnimationFrame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
+
+    renderer.applyFrame(slotTerminalProtocolFixtureFrames.streamChunkA);
+    renderer.applyFrame(slotTerminalProtocolFixtureFrames.streamChunkB);
+
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(terminal.writes).toEqual(["stream-a"]);
+    terminal.flushNextWrite();
+    expect(terminal.writes).toEqual(["stream-a", "\r\nstream-b"]);
+    terminal.flushNextWrite();
+  });
+
+  it("resets terminal state before loading reset snapshots with short lines, SGR and wide characters", async () => {
+    const terminal = new FakeTerminal();
+    const renderer = new SlotTerminalFrameRenderer(terminal);
+
+    renderer.applyFrame({ type: "frame", kind: "stream", data: "\u001b[?1000h\u001b[31mstale" });
+    renderer.applyFrame(slotTerminalProtocolFixtureFrames.reset);
+    await nextRenderFrame();
+
+    expect(terminal.resetCalls).toBe(1);
+    expect(terminal.resizes).toEqual([{ cols: 100, rows: 30 }]);
+    expect(terminal.writes).toEqual([
+      "\u001b[?1000h\u001b[31mstale",
+      "\u001b[31mreset line\u001b[0m\nwide 中文"
+    ]);
+    expect(terminal.operations).toEqual([
+      "write:\u001b[?1000h\u001b[31mstale",
+      "scrollToBottom",
+      "reset",
+      "resize:100x30",
+      "write:\u001b[31mreset line\u001b[0m\nwide 中文",
+      "scrollToBottom"
+    ]);
   });
 
   it("does not force xterm back to the bottom while the user is scrolled up", async () => {
@@ -228,11 +311,12 @@ describe("slot-terminal mock websocket substrate", () => {
     terminal.buffer = { active: { baseY: 12, viewportY: 3 } };
     const renderer = new SlotTerminalFrameRenderer(terminal);
 
-    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 24, generation: 2, initial: false });
+    renderer.applyFrame({ type: "frame", kind: "stream", data: "live" });
     await nextRenderFrame();
 
-    expect(terminal.writes).toEqual([`${SLOT_TERMINAL_FULL_FRAME_CLEAR}live`]);
+    expect(terminal.writes).toEqual(["live"]);
     expect(terminal.scrollToBottomCalls).toBe(0);
+    expect(terminal.buffer.active.viewportY).toBe(3);
   });
 
   it("keeps following live frames when xterm is already at the bottom", async () => {
@@ -240,10 +324,10 @@ describe("slot-terminal mock websocket substrate", () => {
     terminal.buffer = { active: { baseY: 12, viewportY: 12 } };
     const renderer = new SlotTerminalFrameRenderer(terminal);
 
-    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 24, generation: 2, initial: false });
+    renderer.applyFrame({ type: "frame", kind: "stream", data: "live" });
     await nextRenderFrame();
 
-    expect(terminal.writes).toEqual([`${SLOT_TERMINAL_FULL_FRAME_CLEAR}live`]);
+    expect(terminal.writes).toEqual(["live"]);
     expect(terminal.scrollToBottomCalls).toBe(1);
   });
 
@@ -256,7 +340,7 @@ describe("slot-terminal mock websocket substrate", () => {
     host.scrollHeight = 1000;
     const renderer = new SlotTerminalFrameRenderer(terminal, host as unknown as HTMLElement);
 
-    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 40, generation: 2, initial: false });
+    renderer.applyFrame({ type: "frame", kind: "stream", data: "live" });
     await nextRenderFrame();
 
     expect(terminal.scrollToBottomCalls).toBe(1);
@@ -272,7 +356,7 @@ describe("slot-terminal mock websocket substrate", () => {
     host.scrollHeight = 1000;
     const renderer = new SlotTerminalFrameRenderer(terminal, host as unknown as HTMLElement);
 
-    renderer.applyFrame({ type: "frame", data: "live\n", cols: 80, rows: 40, generation: 2, initial: false });
+    renderer.applyFrame({ type: "frame", kind: "stream", data: "live" });
     await nextRenderFrame();
 
     expect(terminal.scrollToBottomCalls).toBe(0);
