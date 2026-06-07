@@ -95,7 +95,7 @@ describe("SlotRequirementsFab", () => {
     expect(mockFetchSlots).toHaveBeenCalledWith("p1");
 
     await user.click(await screen.findByText("需求一"));
-    expect(screen.getByTestId("loc").textContent).toBe("/requirements/r1");
+    expect(screen.getByTestId("loc").textContent).toBe("/projects/p1/requirements/r1");
   });
 
   it("shows an empty state when nothing is bound", async () => {
@@ -126,7 +126,7 @@ describe("SlotRequirementsFab", () => {
       projection([lane({ slotId: "slot-1", state: "bound", requirement: { id: "r1", title: "当前需求" } })])
     );
     const user = userEvent.setup();
-    renderFab("/requirements/r1");
+    renderFab("/projects/p1/requirements/r1");
 
     await user.click(screen.getByLabelText(FAB_LABEL));
     await screen.findByText("当前");

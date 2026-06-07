@@ -13,6 +13,7 @@ import { useNavigate } from "react-router";
 import styles from "./MyWorkPage.module.css";
 import { EmptyState } from "../../components/ui/EmptyState.js";
 import { isTaskArchived, isTaskAttentionNeeded } from "../../lib/node-board-config.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { Badge } from "../../components/ui/Badge.js";
 import { getNodeBadge } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
@@ -95,6 +96,7 @@ function TaskRow({ task, starred, onTaskSelect, onToggleStar }: TaskRowProps) {
 
 export function MyWorkPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const tasks = useProjectStore((state) => state.tasks);
   const loadingData = useProjectStore((state) => state.loadingData);
   const [starred, setStarred] = useState<Set<string>>(() => loadStarred());
@@ -150,7 +152,7 @@ export function MyWorkPage() {
             {needsAttention.map((task) => (
               <TaskRow
                 key={task.id}
-                onTaskSelect={(id) => navigate(`/tasks/${id}`)}
+                onTaskSelect={(id) => navigate(toProjectPath(`/tasks/${id}`))}
                 onToggleStar={toggleStar}
                 starred={starred.has(task.id)}
                 task={task}
@@ -171,7 +173,7 @@ export function MyWorkPage() {
             {starredTasks.map((task) => (
               <TaskRow
                 key={task.id}
-                onTaskSelect={(id) => navigate(`/tasks/${id}`)}
+                onTaskSelect={(id) => navigate(toProjectPath(`/tasks/${id}`))}
                 onToggleStar={toggleStar}
                 starred={true}
                 task={task}
@@ -192,7 +194,7 @@ export function MyWorkPage() {
             {recentlyActive.map((task) => (
               <TaskRow
                 key={task.id}
-                onTaskSelect={(id) => navigate(`/tasks/${id}`)}
+                onTaskSelect={(id) => navigate(toProjectPath(`/tasks/${id}`))}
                 onToggleStar={toggleStar}
                 starred={starred.has(task.id)}
                 task={task}

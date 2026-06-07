@@ -23,6 +23,7 @@ import {
   createTaskBoardProjection,
   isTaskAttentionNeeded
 } from "../../lib/node-board-config.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { getNodeBadge, getPriorityBadge } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import type { RequirementView } from "../../types/requirement.js";
@@ -45,6 +46,7 @@ interface TasksBoardViewProps {
 
 export function TasksBoardRoute() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const [searchParams] = useSearchParams();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const tasks = useProjectStore((state) => state.tasks);
@@ -61,7 +63,7 @@ export function TasksBoardRoute() {
     } else {
       params.delete("view");
     }
-    navigate(`/tasks${params.toString() ? `?${params}` : ""}`, { replace: true });
+    navigate(toProjectPath(`/tasks${params.toString() ? `?${params}` : ""}`), { replace: true });
   };
 
   const handleFilterChange = (next: TaskFilter) => {
@@ -71,7 +73,7 @@ export function TasksBoardRoute() {
     } else {
       params.delete("filter");
     }
-    navigate(`/tasks${params.toString() ? `?${params}` : ""}`, { replace: true });
+    navigate(toProjectPath(`/tasks${params.toString() ? `?${params}` : ""}`), { replace: true });
   };
 
   return (
@@ -80,8 +82,8 @@ export function TasksBoardRoute() {
       loadingData={loadingData}
       onFilterChange={handleFilterChange}
       onIncludeArchivedChange={setIncludeArchived}
-      onRequirementSelect={(requirementId) => navigate(`/requirements/${requirementId}`)}
-      onTaskSelect={(taskId) => navigate(`/tasks/${taskId}`)}
+      onRequirementSelect={(requirementId) => navigate(toProjectPath(`/requirements/${requirementId}`))}
+      onTaskSelect={(taskId) => navigate(toProjectPath(`/tasks/${taskId}`))}
       onViewChange={handleViewChange}
       requirements={requirements}
       selectedProjectId={selectedProjectId}

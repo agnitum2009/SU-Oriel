@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 
 import { AiCliApiError, useAiCliStore } from "../../stores/ai-cli-store.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import type { AiCliLaunchMode, AiCliToolView } from "../../types/ai-cli.js";
@@ -19,6 +20,7 @@ const TOOL_BADGE: Record<string, string> = {
 
 export function AiCliPanel(props: AiCliPanelProps) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const projects = useProjectStore((state) => state.projects);
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const tools = useAiCliStore((state) => state.tools);
@@ -54,7 +56,7 @@ export function AiCliPanel(props: AiCliPanelProps) {
     if (mode === "embedded") {
       try {
         const result = await createSession({ toolId: tool.id, projectId: selectedProjectId });
-        navigate("/ai-cli");
+        navigate(toProjectPath("/ai-cli"));
         addToast("success", `已创建嵌入式会话（${result.descriptor.cwd}）`);
       } catch (error) {
         if (error instanceof AiCliApiError) {
@@ -112,7 +114,7 @@ export function AiCliPanel(props: AiCliPanelProps) {
           </button>
           <button
             className={styles.iconButton}
-            onClick={() => navigate("/ai-cli")}
+            onClick={() => navigate(toProjectPath("/ai-cli"))}
             title="打开 AI CLI 全屏页"
             type="button"
           >

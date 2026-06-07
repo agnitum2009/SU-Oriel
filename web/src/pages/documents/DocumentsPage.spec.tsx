@@ -117,7 +117,7 @@ beforeEach(() => {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/documents"]}>
+    <MemoryRouter initialEntries={["/projects/project-1/documents"]}>
       <DocumentsPage />
     </MemoryRouter>
   );
@@ -175,12 +175,12 @@ test("parseError 仅作为对应文档项的小标记出现", () => {
   expect(screen.queryByLabelText("技术设计 A 解析异常")).toBeNull();
 });
 
-test("点击文档导航到 /documents/:id", () => {
+test("点击文档导航到 scoped /documents/:id", () => {
   renderPage();
   // 默认折叠，先展开目录组再点击文档项。
   fireEvent.click(screen.getByText("docs/03_开发计划"));
   fireEvent.click(screen.getByRole("button", { name: /技术设计 A/ }));
-  expect(navigateMock).toHaveBeenCalledWith("/documents/d-td");
+  expect(navigateMock).toHaveBeenCalledWith("/projects/project-1/documents/d-td");
 });
 
 test("未选择文档时右栏展示新空态文案", () => {

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import styles from "./AlertStrip.module.css";
 import type { NodeId } from "./types.js";
 import { usePendingInteractions } from "./hooks/usePendingInteractions.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import type { TaskDetailView } from "../../types/task.js";
 
 interface AlertStripProps {
@@ -34,6 +35,7 @@ function isNodeId(value: string): value is NodeId {
 
 export function AlertStrip({ task, onSelectNode }: AlertStripProps) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const { data: pendings } = usePendingInteractions(task.id);
   const hasBlocked = Boolean(task.blockedReason?.trim()) || task.runtimeState === "blocked";
   const requirement = task.linkedRequirement;
@@ -71,7 +73,11 @@ export function AlertStrip({ task, onSelectNode }: AlertStripProps) {
             ) : null}
           </div>
           <div className={styles.actions}>
-            <button className={styles.actionButton} onClick={() => navigate("/requirements")} type="button">
+            <button
+              className={styles.actionButton}
+              onClick={() => navigate(toProjectPath(requirement.id ? `/requirements/${requirement.id}` : "/requirements"))}
+              type="button"
+            >
               查看需求
             </button>
           </div>

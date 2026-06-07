@@ -2,6 +2,7 @@ import { useNavigate } from "react-router";
 
 import { DetailDrawer } from "./DetailDrawer.js";
 import styles from "./AdvancedDrawer.module.css";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import type { TaskDetailView } from "../../types/task.js";
 
 interface AdvancedDrawerProps {
@@ -26,6 +27,7 @@ export function AdvancedDrawer({
   onMarkDone
 }: AdvancedDrawerProps) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const sourceDoc = task.linkedDocuments.find((doc) => doc.kind === "dev_task") ?? null;
   const sourcePath = sourceDoc?.path ?? null;
 
@@ -47,7 +49,7 @@ export function AdvancedDrawer({
         </div>
         <div className={styles.actions}>
           {sourceDoc ? (
-            <button className={styles.button} onClick={() => navigate(`/documents/${sourceDoc.id}`)} type="button">
+            <button className={styles.button} onClick={() => navigate(toProjectPath(`/documents/${sourceDoc.id}`))} type="button">
               打开文档
             </button>
           ) : null}

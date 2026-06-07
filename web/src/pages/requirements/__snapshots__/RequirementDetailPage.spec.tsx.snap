@@ -416,7 +416,7 @@ exports[`RequirementDetailPage 极简详情页 > renders the artifact catalog wi
             </button>
             <a
               class="_link_4558f6"
-              href="/slots"
+              href="/projects/project-1/anchors"
             >
               打开 Slots
             </a>

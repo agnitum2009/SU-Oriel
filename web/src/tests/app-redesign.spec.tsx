@@ -61,6 +61,7 @@ vi.mock("../lib/console-api.js", () => ({
 
 import App from "../App.js";
 import * as consoleApi from "../lib/console-api.js";
+import { useProjectStore } from "../stores/project-store.js";
 
 class MockEventSource extends EventTarget {
   static instances: MockEventSource[] = [];
@@ -81,6 +82,8 @@ const project: ProjectView = {
   syncStatus: "idle",
   lastScanAt: "2026-04-16T10:00:00.000Z"
 };
+
+const scoped = (path: string) => `/projects/project-1${path}`;
 
 const indexHealth: ProjectIndexHealthView = {
   projectId: "project-1",
@@ -355,6 +358,18 @@ describe("前端重构后的控制台骨架", () => {
     vi.clearAllMocks();
     MockEventSource.instances = [];
     vi.stubGlobal("EventSource", MockEventSource);
+    useProjectStore.setState({
+      projects: [],
+      selectedProjectId: null,
+      documents: [],
+      tasks: [],
+      requirements: [],
+      syncJobs: [],
+      indexHealth: null,
+      loadingProjects: false,
+      loadingData: false,
+      savingTask: false
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(() =>
@@ -376,18 +391,64 @@ describe("前端重构后的控制台骨架", () => {
     vi.unstubAllGlobals();
   });
 
-  it("根路径会重定向到概览页并展示项目概览头部", async () => {
+  it("根路径展示项目选择页，点击项目后进入 scoped 概览页", async () => {
     render(<App />);
 
+    expect(await screen.findByText("选择项目")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /SU-CCB/ }));
+
     await waitFor(() => {
-      expect(window.location.pathname).toBe("/overview");
+      expect(window.location.pathname).toBe(scoped("/overview"));
     });
 
     expect(await screen.findAllByText(/SU-CCB/).then(els => els[0])).toBeInTheDocument();
   });
 
-  it("任务详情由 URL 驱动打开全屏详情页", async () => {
+  it("scoped 项目路由在项目列表未加载完成前显示等待态", async () => {
+    vi.mocked(consoleApi.fetchProjects).mockReturnValue(new Promise<ProjectView[]>(() => undefined));
+    window.history.pushState({}, "", scoped("/overview"));
+
+    render(<App />);
+
+    expect(await screen.findByText("正在加载项目")).toBeInTheDocument();
+  });
+
+  it("scoped 项目不存在时显示明确错误页", async () => {
+    window.history.pushState({}, "", "/projects/missing-project/overview");
+
+    render(<App />);
+
+    expect(await screen.findByText("项目不存在")).toBeInTheDocument();
+    expect(screen.getByText(/missing-project/)).toBeInTheDocument();
+  });
+
+  it("旧任务、需求、文档链接会按 id 智能跳转到 scoped URL", async () => {
     window.history.pushState({}, "", "/tasks/task-1");
+    let rendered = render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe(scoped("/tasks/task-1")));
+    rendered.unmount();
+
+    window.history.pushState({}, "", "/requirements/req-1");
+    rendered = render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe(scoped("/requirements/req-1")));
+    rendered.unmount();
+
+    window.history.pushState({}, "", "/documents/doc-1");
+    rendered = render(<App />);
+    await waitFor(() => expect(window.location.pathname).toBe(scoped("/documents/doc-1")));
+  });
+
+  it("无法解析的旧路径进入项目选择页", async () => {
+    window.history.pushState({}, "", "/overview");
+
+    render(<App />);
+
+    expect(await screen.findByText("选择项目")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("任务详情由 URL 驱动打开全屏详情页", async () => {
+    window.history.pushState({}, "", scoped("/tasks/task-1"));
 
     render(<App />);
 
@@ -395,12 +456,12 @@ describe("前端重构后的控制台骨架", () => {
     expect(screen.getByRole("button", { name: "返回看板" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "任务详情" })).not.toBeInTheDocument();
     expect((await screen.findAllByText("用户登录任务卡")).length).toBeGreaterThan(0);
-    expect(window.location.pathname).toBe("/tasks/task-1");
+    expect(window.location.pathname).toBe(scoped("/tasks/task-1"));
   });
 
   it("任务看板按 4 个子任务执行列展示", async () => {
     vi.mocked(consoleApi.fetchTasks).mockResolvedValue([taskList[0], blockedTask]);
-    window.history.pushState({}, "", "/tasks");
+    window.history.pushState({}, "", scoped("/tasks"));
 
     render(<App />);
 
@@ -413,7 +474,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("任务看板与 Reconcile 入口已从侧边栏隐藏（路由仍可直达）", async () => {
-    window.history.pushState({}, "", "/overview");
+    window.history.pushState({}, "", scoped("/overview"));
 
     const { container } = render(<App />);
 
@@ -429,7 +490,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("文档页会按 Markdown 语义渲染正文", async () => {
-    window.history.pushState({}, "", "/documents/doc-1");
+    window.history.pushState({}, "", scoped("/documents/doc-1"));
 
     render(<App />);
 
@@ -438,7 +499,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("需求看板把 delivering 需求显示在推进中列，徽章中文化", async () => {
-    window.history.pushState({}, "", "/requirements");
+    window.history.pushState({}, "", scoped("/requirements"));
 
     render(<App />);
 
@@ -454,7 +515,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("任务详情展示关联需求与 state 真源信息", async () => {
-    window.history.pushState({}, "", "/tasks/task-1");
+    window.history.pushState({}, "", scoped("/tasks/task-1"));
 
     render(<App />);
 
@@ -514,7 +575,7 @@ describe("前端重构后的控制台骨架", () => {
         }
       ]
     });
-    window.history.pushState({}, "", "/tasks/task-archived");
+    window.history.pushState({}, "", scoped("/tasks/task-archived"));
 
     render(<App />);
 
@@ -524,6 +585,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("命令面板支持快捷键、搜索、键盘执行和点击执行", async () => {
+    window.history.pushState({}, "", scoped("/overview"));
     render(<App />);
 
     await screen.findAllByText(/SU-CCB/).then(els => els[0]);
@@ -544,7 +606,7 @@ describe("前端重构后的控制台骨架", () => {
     fireEvent.keyDown(window, { key: "Enter" });
 
     await waitFor(() => {
-      expect(window.location.pathname).toBe("/documents");
+      expect(window.location.pathname).toBe(scoped("/documents"));
     });
     expect(screen.queryByRole("dialog", { name: "命令面板" })).not.toBeInTheDocument();
 
@@ -562,7 +624,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("运行记录会对扩展 jobType 和未知 status 使用 fallback 展示", async () => {
-    window.history.pushState({}, "", "/runs");
+    window.history.pushState({}, "", scoped("/runs"));
 
     render(<App />);
 
@@ -572,7 +634,7 @@ describe("前端重构后的控制台骨架", () => {
   });
 
   it("AI CLI 页面保持可渲染", async () => {
-    window.history.pushState({}, "", "/ai-cli");
+    window.history.pushState({}, "", scoped("/ai-cli"));
 
     render(<App />);
 

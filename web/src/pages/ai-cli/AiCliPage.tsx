@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { Button } from "../../components/ui/Button.js";
 import { EmbeddedTerminal } from "../../components/ai-cli/EmbeddedTerminal.js";
 import { AiCliApiError, useAiCliStore } from "../../stores/ai-cli-store.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import type { EmbeddedLayout } from "../../stores/ai-cli-store.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
@@ -51,6 +52,7 @@ function sessionTitle(session: PtySessionDescriptorView): string {
 
 export function AiCliPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const projects = useProjectStore((state) => state.projects);
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const tools = useAiCliStore((state) => state.tools);
@@ -344,7 +346,7 @@ export function AiCliPage() {
               <RecordingRow
                 key={recording.id}
                 onDelete={() => void handleDeleteRecording(recording.id)}
-                onPlay={() => navigate(`/ai-cli/recordings/${recording.id}`)}
+                onPlay={() => navigate(toProjectPath(`/ai-cli/recordings/${recording.id}`))}
                 recording={recording}
               />
             ))}

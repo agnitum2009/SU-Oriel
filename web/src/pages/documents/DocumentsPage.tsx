@@ -9,6 +9,7 @@ import { SkeletonCard } from "../../components/ui/Skeleton.js";
 import { projectDocumentBrowser } from "../../lib/document-browser-projection.js";
 import { formatRelativePath } from "../../lib/format.js";
 import { stripFrontmatter } from "../../lib/markdown.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { getDocumentKindBadge } from "../../lib/ui-mapping.js";
 import type { DocumentTier, DocumentView } from "../../types/document.js";
 import { useDetailStore } from "../../stores/detail-store.js";
@@ -21,6 +22,7 @@ const TIER_FILTERS: readonly TierFilter[] = ["全部", "生效中", "历史", "�
 
 export function DocumentsPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const params = useParams();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const documents = useProjectStore((state) => state.documents);
@@ -121,7 +123,7 @@ export function DocumentsPage() {
         className={styles.navItem}
         data-active={String(document.id === documentId)}
         key={document.id}
-        onClick={() => navigate(`/documents/${document.id}`)}
+        onClick={() => navigate(toProjectPath(`/documents/${document.id}`))}
         type="button"
       >
         <span className={styles.navItemMain}>

@@ -8,12 +8,14 @@ import { EmptyState } from "../../components/ui/EmptyState.js";
 import { SkeletonStat } from "../../components/ui/Skeleton.js";
 import { formatDayTime } from "../../lib/format.js";
 import { createTaskBoardProjection, isTaskAttentionNeeded } from "../../lib/node-board-config.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { classifyRequirementTab } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 
 export function OverviewPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const requirements = useProjectStore((state) => state.requirements);
   const tasks = useProjectStore((state) => state.tasks);
@@ -89,7 +91,7 @@ export function OverviewPage() {
             <div className={styles.sectionTitle}>需求</div>
             <div className={styles.sectionDescription}>本项目当前的需求概览。</div>
           </div>
-          <button className={styles.linkButton} onClick={() => navigate("/requirements")} type="button">
+          <button className={styles.linkButton} onClick={() => navigate(toProjectPath("/requirements"))} type="button">
             查看全部 →
           </button>
         </div>
@@ -114,15 +116,15 @@ export function OverviewPage() {
           </div>
         </div>
         <div className={styles.compactGrid}>
-          <button className={styles.compactItem} onClick={() => navigate("/tasks")} type="button">
+          <button className={styles.compactItem} onClick={() => navigate(toProjectPath("/tasks"))} type="button">
             <span className={styles.compactLabel}>任务</span>
             <strong className={styles.compactValue}>{taskProjection.visibleTaskCount}</strong>
           </button>
-          <button className={styles.compactItem} onClick={() => navigate("/tasks")} type="button">
+          <button className={styles.compactItem} onClick={() => navigate(toProjectPath("/tasks"))} type="button">
             <span className={styles.compactLabel}>阻塞任务</span>
             <strong className={styles.compactValue}>{blockedTaskCount}</strong>
           </button>
-          <button className={styles.compactItem} onClick={() => navigate("/documents")} type="button">
+          <button className={styles.compactItem} onClick={() => navigate(toProjectPath("/documents"))} type="button">
             <span className={styles.compactLabel}>文档</span>
             <strong className={styles.compactValue}>{documents.length}</strong>
           </button>
@@ -143,7 +145,7 @@ export function OverviewPage() {
             <span className={styles.compactLabel}>解析失败</span>
             <strong className={styles.compactValue}>{parseFailureCount}</strong>
           </div>
-          <button className={styles.compactItem} onClick={() => navigate("/runs")} type="button">
+          <button className={styles.compactItem} onClick={() => navigate(toProjectPath("/runs"))} type="button">
             <span className={styles.compactLabel}>扫描失败</span>
             <strong className={styles.compactValue}>{failedScanCount}</strong>
           </button>

@@ -9,6 +9,7 @@ import {
   type PendingIntentView,
   type UserIntentType
 } from "../../lib/user-intent-api.js";
+import { projectSlotsPath } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import { Button } from "../ui/Button.js";
@@ -203,7 +204,9 @@ export function AnchorStartStrip(props: AnchorStartStripProps) {
             未绑定
           </Button>
         )}
-        <Link className={styles.slotsLink} to="/slots">打开 Slots</Link>
+        <Link className={styles.slotsLink} to={selectedProjectId ? projectSlotsPath(selectedProjectId) : "/"}>
+          打开 Slots
+        </Link>
       </div>
 
       <StopAndAppendDialog

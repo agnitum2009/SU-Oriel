@@ -83,17 +83,47 @@ describe("ADR-0012 §R3 silentRefreshProjects", () => {
     expect(useProjectStore.getState().projects).toHaveLength(1);
   });
 
-  it("loadProjects 清理已经不存在的 selectedProjectId", async () => {
+  it("loadProjects 不改写 URL 投影的 selectedProjectId，仅清理失效项目数据", async () => {
     useProjectStore.setState({
       projects: [makeProject({ id: "stale-project" })],
-      selectedProjectId: "stale-project"
+      selectedProjectId: "stale-project",
+      documents: [{ id: "doc-1" } as never],
+      tasks: [{ id: "task-1" } as never],
+      requirements: [{ id: "req-1" } as never]
     });
     mockFetchProjectsResponse([]);
 
     await useProjectStore.getState().loadProjects();
 
     expect(useProjectStore.getState().projects).toHaveLength(0);
+    expect(useProjectStore.getState().selectedProjectId).toBe("stale-project");
+    expect(useProjectStore.getState().documents).toHaveLength(0);
+    expect(useProjectStore.getState().tasks).toHaveLength(0);
+    expect(useProjectStore.getState().requirements).toHaveLength(0);
+  });
+
+  it("project identity 只能通过 URL 同步器写入，旧 selectProject setter 已移除", () => {
+    expect(useProjectStore.getState()).not.toHaveProperty("selectProject");
+
+    useProjectStore.getState().syncSelectedProjectFromUrl("p1");
+    expect(useProjectStore.getState().selectedProjectId).toBe("p1");
+    useProjectStore.getState().syncSelectedProjectFromUrl(null);
     expect(useProjectStore.getState().selectedProjectId).toBeNull();
+  });
+
+  it("silentRefreshProjects 不修正失效 selectedProjectId，避免 30s 轮询造成身份漂移", async () => {
+    useProjectStore.setState({
+      projects: [makeProject({ id: "stale-project" })],
+      selectedProjectId: "stale-project",
+      documents: [{ id: "doc-1" } as never]
+    });
+    mockFetchProjectsResponse([makeProject({ id: "p2" })]);
+
+    await useProjectStore.getState().silentRefreshProjects();
+
+    expect(useProjectStore.getState().selectedProjectId).toBe("stale-project");
+    expect(useProjectStore.getState().projects.map((project) => project.id)).toEqual(["p2"]);
+    expect(useProjectStore.getState().documents).toHaveLength(0);
   });
 
   it("scanProject 在 selectedProjectId 不属于项目列表时给出前端友好错误", async () => {

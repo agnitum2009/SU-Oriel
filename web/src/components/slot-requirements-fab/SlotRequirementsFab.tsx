@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { fetchSlots } from "../../lib/console-api.js";
+import { stripProjectPathPrefix, useProjectPathBuilder } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { deriveBoundRequirementItems, type BoundRequirementItem } from "./deriveBoundRequirementItems.js";
 import styles from "./SlotRequirementsFab.module.css";
@@ -9,7 +10,7 @@ import styles from "./SlotRequirementsFab.module.css";
 type LoadState = "idle" | "loading" | "loaded" | "error";
 
 function matchRequirementId(pathname: string): string | null {
-  const matched = pathname.match(/^\/requirements\/([^/]+)/);
+  const matched = stripProjectPathPrefix(pathname).match(/^\/requirements\/([^/]+)/);
   return matched ? matched[1] : null;
 }
 
@@ -23,6 +24,7 @@ export function SlotRequirementsFab() {
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const navigate = useNavigate();
   const location = useLocation();
+  const toProjectPath = useProjectPathBuilder();
 
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<BoundRequirementItem[]>([]);
@@ -76,9 +78,9 @@ export function SlotRequirementsFab() {
   const select = useCallback(
     (requirementId: string) => {
       setOpen(false);
-      navigate(`/requirements/${requirementId}`);
+      navigate(toProjectPath(`/requirements/${requirementId}`));
     },
-    [navigate]
+    [navigate, toProjectPath]
   );
 
   if (!selectedProjectId) {

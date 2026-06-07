@@ -7,7 +7,7 @@ import type { SlotProjectionView } from "../../lib/console-api.js";
 import { AnchorStartStrip } from "./AnchorStartStrip.js";
 
 function renderWithRouter(ui: ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
+  return render(<MemoryRouter initialEntries={["/projects/project-1/tasks/task-1"]}>{ui}</MemoryRouter>);
 }
 
 vi.mock("../../lib/console-api.js", () => ({
@@ -123,7 +123,7 @@ describe("AnchorStartStrip", () => {
 
     expect(await screen.findByText("slot-3 已绑定")).toBeInTheDocument();
     expect(screen.getByText("终端请在 ccb 原生 sidebar 查看 slot 窗口")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/slots");
+    expect(screen.getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/projects/project-1/anchors");
     expect(screen.queryByRole("button", { name: "启动 Anchor" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重置 anchor" })).not.toBeInTheDocument();
     expect(screen.queryByText(/worktree/i)).not.toBeInTheDocument();

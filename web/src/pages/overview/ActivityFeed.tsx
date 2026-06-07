@@ -2,6 +2,7 @@ import { useNavigate } from "react-router";
 
 import styles from "./ActivityFeed.module.css";
 import { EmptyState } from "../../components/ui/EmptyState.js";
+import { projectPath } from "../../lib/project-paths.js";
 import { useActivityRecent, type ActivityEvent } from "../../lib/use-activity-recent.js";
 
 type ActivityTone = "success" | "warn" | "danger" | "info";
@@ -112,7 +113,10 @@ export function mapActivityEvent(event: ActivityEvent): ActivityFeedItem {
       tone: "success",
       icon: "🟢",
       label: `${taskLabel} receipt ready (codex)`,
-      target: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation` : null,
+      target:
+        event.taskId && event.projectId
+          ? projectPath(event.projectId, `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation`)
+          : null,
       ariaLabel: event.taskId ? `Open ${event.taskId} consultation activity` : null
     };
   }
@@ -125,7 +129,10 @@ export function mapActivityEvent(event: ActivityEvent): ActivityFeedItem {
       tone: "success",
       icon: "🟢",
       label: `${taskLabel} transition apply${route}`,
-      target: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}?tab=node-flow` : null,
+      target:
+        event.taskId && event.projectId
+          ? projectPath(event.projectId, `/tasks/${encodeURIComponent(event.taskId)}?tab=node-flow`)
+          : null,
       ariaLabel: event.taskId ? `Open ${event.taskId} node flow activity` : null
     };
   }
@@ -141,7 +148,10 @@ export function mapActivityEvent(event: ActivityEvent): ActivityFeedItem {
       tone: "warn",
       icon: "🟡",
       label: `${taskLabel} capability fallback (${capability} → ${provider})`,
-      target: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation` : null,
+      target:
+        event.taskId && event.projectId
+          ? projectPath(event.projectId, `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation`)
+          : null,
       ariaLabel: event.taskId ? `Open ${event.taskId} consultation activity` : null
     };
   }
@@ -156,7 +166,10 @@ export function mapActivityEvent(event: ActivityEvent): ActivityFeedItem {
       tone: "danger",
       icon: "🔴",
       label: `${taskLabel} capability missing (${capability})`,
-      target: event.taskId ? `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation` : null,
+      target:
+        event.taskId && event.projectId
+          ? projectPath(event.projectId, `/tasks/${encodeURIComponent(event.taskId)}?tab=consultation`)
+          : null,
       ariaLabel: event.taskId ? `Open ${event.taskId} consultation activity` : null
     };
   }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../ui/Button.js";
 import { fetchTerminalDescriptor } from "../../lib/console-api.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import type { SlotTerminalWebSocketFactory } from "../../lib/slot-terminal-ws.js";
 import type {
   SlotTerminalDescriptor,
@@ -148,6 +149,7 @@ export function SlotPanelActions(props: {
   onBindSlot: () => void;
   onReleaseSlot: () => void;
 }) {
+  const toProjectPath = useProjectPathBuilder();
   return (
     <div className={styles.actions}>
       {!props.hasSlot ? (
@@ -165,7 +167,7 @@ export function SlotPanelActions(props: {
           解绑 slot
         </Button>
       ) : null}
-      <a className={styles.link} href="/slots">打开 Slots</a>
+      <a className={styles.link} href={toProjectPath("/anchors")}>打开 Slots</a>
     </div>
   );
 }

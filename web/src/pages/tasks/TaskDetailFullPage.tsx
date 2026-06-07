@@ -6,6 +6,7 @@ import { TaskDetailPage } from "./TaskDetailPage.js";
 import { Badge } from "../../components/ui/Badge.js";
 import { EmptyState } from "../../components/ui/EmptyState.js";
 import { SkeletonCard } from "../../components/ui/Skeleton.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { useDetailStore } from "../../stores/detail-store.js";
 import { useProjectStore } from "../../stores/project-store.js";
 
@@ -21,6 +22,7 @@ function syncBadgeColor(status: string | undefined) {
 
 export function TaskDetailFullPage({ taskId }: TaskDetailFullPageProps) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const taskDetail = useDetailStore((state) => state.taskDetail);
   const loadingTaskDetail = useDetailStore((state) => state.loadingTaskDetail);
   const loadTaskDetail = useDetailStore((state) => state.loadTaskDetail);
@@ -37,7 +39,7 @@ export function TaskDetailFullPage({ taskId }: TaskDetailFullPageProps) {
   return (
     <main className={styles.fullPage} data-testid="task-detail-full-page">
       <header className={styles.fullPageHeader}>
-        <button aria-label="返回看板" className={styles.fullPageBackButton} onClick={() => navigate("/tasks")} type="button">
+        <button aria-label="返回看板" className={styles.fullPageBackButton} onClick={() => navigate(toProjectPath("/tasks"))} type="button">
           <span aria-hidden="true">←</span>
           <span>返回看板</span>
         </button>
@@ -47,7 +49,7 @@ export function TaskDetailFullPage({ taskId }: TaskDetailFullPageProps) {
               <button
                 aria-label={`打开父需求 ${taskDetail.linkedRequirement.title}`}
                 className={styles.crumbLink}
-                onClick={() => navigate(`/requirements/${taskDetail.linkedRequirement!.id}`)}
+                onClick={() => navigate(toProjectPath(`/requirements/${taskDetail.linkedRequirement!.id}`))}
                 type="button"
               >
                 📋 {taskDetail.linkedRequirement.title}

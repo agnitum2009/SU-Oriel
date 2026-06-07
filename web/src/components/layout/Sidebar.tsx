@@ -3,6 +3,7 @@ import { NavLink } from "react-router";
 
 import { fetchVersion, type SuOrielVersion } from "../../lib/console-api.js";
 import { getTaskAttentionSummary } from "../../lib/node-board-config.js";
+import { projectPath } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import type { ProjectView } from "../../types/project.js";
 import { useUIStore } from "../../stores/ui-store.js";
@@ -165,11 +166,12 @@ export function Sidebar(props: SidebarProps) {
             )}
             {visibleItems.map((item) => {
               const showTaskBadge = item.to === "/tasks" && taskAttention.total > 0;
+              const to = props.selectedProjectId ? projectPath(props.selectedProjectId, item.to) : "/";
               return (
                 <NavLink
                   className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
                   key={item.to}
-                  to={item.to}
+                  to={to}
                 >
                   <span className={styles.navIcon}>{item.icon}</span>
                   {!sidebarCollapsed ? (

@@ -11,6 +11,7 @@ import {
   refreshRequirementStatus
 } from "../../lib/console-api.js";
 import { formatDateTime } from "../../lib/format.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { createRequirementBoardProjection } from "../../lib/requirement-board-config.js";
 import { getRequirementAction, getRequirementStatusBadge } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
@@ -18,6 +19,7 @@ import { useUIStore } from "../../stores/ui-store.js";
 
 export function RequirementsPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const requirements = useProjectStore((state) => state.requirements);
   const loadingData = useProjectStore((state) => state.loadingData);
@@ -103,7 +105,7 @@ export function RequirementsPage() {
     );
   }
 
-  const navigateToDetail = (requirementId: string) => navigate(`/requirements/${requirementId}`);
+  const navigateToDetail = (requirementId: string) => navigate(toProjectPath(`/requirements/${requirementId}`));
 
   return (
     <div className={styles.page}>

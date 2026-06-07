@@ -63,7 +63,7 @@ function LocationProbe() {
 
 function renderManager(projectId: string | null = "p1") {
   return render(
-    <MemoryRouter initialEntries={["/overview"]}>
+    <MemoryRouter initialEntries={["/projects/p1/overview"]}>
       <NotificationManager pollMs={POLL_MS} projectId={projectId} />
       <LocationProbe />
     </MemoryRouter>
@@ -72,7 +72,7 @@ function renderManager(projectId: string | null = "p1") {
 
 function renderTwoManagers() {
   return render(
-    <MemoryRouter initialEntries={["/overview"]}>
+    <MemoryRouter initialEntries={["/projects/p1/overview"]}>
       <NotificationManager pollMs={POLL_MS} projectId="p1" />
       <NotificationManager pollMs={POLL_MS} projectId="p1" />
     </MemoryRouter>
@@ -229,7 +229,7 @@ describe("NotificationManager", () => {
     notificationInputRef.current?.onClick?.();
     await flushAsync();
 
-    expect(screen.getByTestId("location").textContent).toBe("/requirements/req-1");
+    expect(screen.getByTestId("location").textContent).toBe("/projects/p1/requirements/req-1");
     expect(mockAckAttention).toHaveBeenCalledWith("p1", "attention-1");
   });
 
@@ -291,13 +291,13 @@ describe("NotificationManager", () => {
       .mockResolvedValueOnce(list("p2", [p2Existing, p2New]));
 
     const rendered = render(
-      <MemoryRouter initialEntries={["/overview"]}>
+      <MemoryRouter initialEntries={["/projects/p1/overview"]}>
         <NotificationManager pollMs={POLL_MS} projectId="p1" />
       </MemoryRouter>
     );
     await flushAsync();
     rendered.rerender(
-      <MemoryRouter initialEntries={["/overview"]}>
+      <MemoryRouter initialEntries={["/projects/p2/overview"]}>
         <NotificationManager pollMs={POLL_MS} projectId="p2" />
       </MemoryRouter>
     );

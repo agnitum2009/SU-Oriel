@@ -33,7 +33,7 @@ interface ProjectStore {
   savingTask: boolean;
   loadProjects: () => Promise<void>;
   silentRefreshProjects: () => Promise<void>;
-  selectProject: (id: string) => void;
+  syncSelectedProjectFromUrl: (id: string | null) => void;
   loadProjectData: (projectId: string) => Promise<void>;
   createProject: (input: CreateProjectFormValue) => Promise<ProjectView>;
   scanProject: () => Promise<void>;
@@ -45,7 +45,7 @@ function resolveSelectedProjectId(projects: ProjectView[], selectedProjectId: st
   if (selectedProjectId && projects.some((project) => project.id === selectedProjectId)) {
     return selectedProjectId;
   }
-  return projects[0]?.id ?? null;
+  return null;
 }
 
 function emptyProjectData() {
@@ -77,7 +77,6 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
         const selectedProjectId = resolveSelectedProjectId(projects, state.selectedProjectId);
         return {
           projects,
-          selectedProjectId,
           ...(selectedProjectId === state.selectedProjectId ? {} : emptyProjectData())
         };
       });
@@ -94,7 +93,6 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
         const selectedProjectId = resolveSelectedProjectId(projects, state.selectedProjectId);
         return {
           projects,
-          selectedProjectId,
           ...(selectedProjectId === state.selectedProjectId ? {} : emptyProjectData())
         };
       });
@@ -102,7 +100,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       // polling 失败不打扰用户；下一次心跳会重试
     }
   },
-  selectProject: (id) => {
+  syncSelectedProjectFromUrl: (id) => {
     set({ selectedProjectId: id });
   },
   loadProjectData: async (projectId) => {
@@ -124,10 +122,8 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     const createdProject = await createProjectRequest(input);
     const projects = await fetchProjects();
     set({
-      projects,
-      selectedProjectId: createdProject.id
+      projects
     });
-    await get().loadProjectData(createdProject.id);
     return createdProject;
   },
   scanProject: async () => {
@@ -136,10 +132,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       throw new Error("当前没有选中的项目");
     }
     if (!get().projects.some((project) => project.id === projectId)) {
-      set((state) => ({
-        selectedProjectId: resolveSelectedProjectId(state.projects, null),
-        ...emptyProjectData()
-      }));
+      set(emptyProjectData());
       throw new Error(MISSING_PROJECT_MESSAGE);
     }
 

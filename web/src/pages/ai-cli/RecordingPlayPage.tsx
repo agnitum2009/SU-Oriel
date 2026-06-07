@@ -8,6 +8,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { Button } from "../../components/ui/Button.js";
 import { fetchAiCliRecording } from "../../lib/ai-cli-api.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import type { RecordingMetaView } from "../../types/ai-cli.js";
 import styles from "./RecordingPlayPage.module.css";
 
@@ -73,6 +74,7 @@ const SPEEDS = [0.5, 1, 2, 4];
 export function RecordingPlayPage() {
   const { recordingId } = useParams<{ recordingId: string }>();
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -245,7 +247,7 @@ export function RecordingPlayPage() {
           )}
         </div>
         <div className={styles.actions}>
-          <Button onClick={() => navigate("/ai-cli")} size="sm" variant="secondary">
+          <Button onClick={() => navigate(toProjectPath("/ai-cli"))} size="sm" variant="secondary">
             返回 AI CLI
           </Button>
         </div>

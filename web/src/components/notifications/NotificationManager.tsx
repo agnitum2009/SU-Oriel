@@ -10,6 +10,7 @@ import {
   setAttentionBadge,
   showBrowserNotification
 } from "../../lib/browser-notify.js";
+import { projectPath } from "../../lib/project-paths.js";
 import { useUIStore } from "../../stores/ui-store.js";
 
 const DEFAULT_POLL_MS = 7_000;
@@ -101,7 +102,7 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
       } catch {
         // ignore
       }
-      navigateRef.current(buildAttentionNavigatePath(item));
+      navigateRef.current(buildAttentionNavigatePath(item, projectId));
       void ackWithRetry(item.ref, true);
     };
 
@@ -188,20 +189,22 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
   return null;
 }
 
-export function buildAttentionNavigatePath(item: AttentionItem): string {
+export function buildAttentionNavigatePath(item: AttentionItem, fallbackProjectId?: string | null): string {
+  const projectId = item.projectId ?? fallbackProjectId ?? null;
+  const scoped = (path: string) => (projectId ? projectPath(projectId, path) : path);
   if (item.cta.type === "task" && item.cta.taskId) {
-    return `/tasks/${item.cta.taskId}`;
+    return scoped(`/tasks/${item.cta.taskId}`);
   }
   if (item.cta.type === "requirement" && item.cta.requirementId) {
-    return `/requirements/${item.cta.requirementId}`;
+    return scoped(`/requirements/${item.cta.requirementId}`);
   }
   if (item.taskId) {
-    return `/tasks/${item.taskId}`;
+    return scoped(`/tasks/${item.taskId}`);
   }
   if (item.requirementId) {
-    return `/requirements/${item.requirementId}`;
+    return scoped(`/requirements/${item.requirementId}`);
   }
-  return "/overview";
+  return scoped("/overview");
 }
 
 export function createAttentionTabCoordinator(projectId: string): AttentionTabCoordinator {

@@ -83,6 +83,8 @@ const project: ProjectView = {
   lastScanAt: "2026-05-09T00:00:00.000Z"
 };
 
+const scoped = (path: string) => `/projects/project-1${path}`;
+
 const task: TaskView = {
   id: "task-1",
   projectId: "project-1",
@@ -152,7 +154,7 @@ describe("Task detail v2 cutover acceptance", () => {
 
     fireEvent.click(screen.getByText("PR12 cutover task"));
 
-    await waitFor(() => expect(window.location.pathname).toBe("/tasks/task-1"));
+    await waitFor(() => expect(window.location.pathname).toBe(scoped("/tasks/task-1")));
     expect(await screen.findByTestId("task-detail-full-page")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回看板" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "任务详情" })).not.toBeInTheDocument();
@@ -268,7 +270,7 @@ describe("Task detail v2 cutover acceptance", () => {
 
     expect(await screen.findByText("slot-3 已绑定")).toBeInTheDocument();
     expect(screen.getByText("终端请在 ccb 原生 sidebar 查看 slot 窗口")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/slots");
+    expect(screen.getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", scoped("/anchors"));
     expect(screen.queryByText("Anchor 终端")).not.toBeInTheDocument();
     expect(screen.queryByText("启动 Anchor")).not.toBeInTheDocument();
     expect(screen.queryByText("重置 anchor")).not.toBeInTheDocument();
@@ -276,14 +278,14 @@ describe("Task detail v2 cutover acceptance", () => {
 });
 
 async function renderTask(route: string): Promise<void> {
-  window.history.pushState({}, "", route);
+  window.history.pushState({}, "", scoped(route));
   render(<App />);
   await screen.findByTestId("task-detail-full-page");
   await screen.findByTestId("task-detail-page");
 }
 
 async function renderBoard(route: string): Promise<void> {
-  window.history.pushState({}, "", route);
+  window.history.pushState({}, "", scoped(route));
   render(<App />);
   await screen.findByText("PR12 cutover task");
 }

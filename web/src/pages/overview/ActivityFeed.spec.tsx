@@ -73,10 +73,10 @@ describe("ActivityFeed", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(activityResponse)));
 
     render(
-      <MemoryRouter initialEntries={["/overview"]}>
+      <MemoryRouter initialEntries={["/projects/project-1/overview"]}>
         <Routes>
-          <Route element={<ActivityFeed />} path="/overview" />
-          <Route element={<TaskRouteProbe />} path="/tasks/:taskId" />
+          <Route element={<ActivityFeed />} path="/projects/:projectId/overview" />
+          <Route element={<TaskRouteProbe />} path="/projects/:projectId/tasks/:taskId" />
         </Routes>
       </MemoryRouter>
     );

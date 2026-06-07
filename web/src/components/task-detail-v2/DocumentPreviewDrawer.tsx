@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import styles from "./DocumentPreviewDrawer.module.css";
 import { MarkdownViewer } from "../shared/MarkdownViewer.js";
 import { fetchDocumentDetail } from "../../lib/console-api.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { getDocumentKindBadge } from "../../lib/ui-mapping.js";
 import type { DocumentDetailView } from "../../types/document.js";
 
@@ -15,6 +16,7 @@ interface DocumentPreviewDrawerProps {
 
 export function DocumentPreviewDrawer({ documentId, onClose, onCopyPath }: DocumentPreviewDrawerProps) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const [detail, setDetail] = useState<DocumentDetailView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +156,7 @@ export function DocumentPreviewDrawer({ documentId, onClose, onCopyPath }: Docum
               aria-label="在文档页打开"
               className={styles.primaryButton}
               onClick={() => {
-                navigate(`/documents/${detail.id}`);
+                navigate(toProjectPath(`/documents/${detail.id}`));
                 onClose();
               }}
               type="button"

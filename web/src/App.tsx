@@ -5,7 +5,8 @@ import {
   RouterProvider,
   createBrowserRouter,
   useLocation,
-  useNavigate
+  useNavigate,
+  useParams
 } from "react-router";
 
 import styles from "./App.module.css";
@@ -21,6 +22,7 @@ import { Sidebar } from "./components/layout/Sidebar.js";
 import { ProjectScanProgressBar } from "./components/projects/ProjectScanProgressBar.js";
 import { RequirementMarkdownEditor } from "./components/requirements/RequirementMarkdownEditor.js";
 import { Button } from "./components/ui/Button.js";
+import { EmptyState } from "./components/ui/EmptyState.js";
 import { Input, Textarea } from "./components/ui/Input.js";
 import { Modal } from "./components/ui/Modal.js";
 import { ToastViewport } from "./components/ui/Toast.js";
@@ -39,7 +41,25 @@ import { ReconcileReportsPage } from "./pages/reconcile/ReconcileReportsPage.js"
 import { RunsPage } from "./pages/runs/RunsPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { TasksPage } from "./pages/tasks/TasksPage.js";
-import { uploadRequirementAsset } from "./lib/console-api.js";
+import {
+  fetchDocumentDetail,
+  fetchProjects,
+  fetchRequirements,
+  fetchTaskDetail,
+  uploadRequirementAsset
+} from "./lib/console-api.js";
+import {
+  ProjectScopeContext,
+  projectDocumentPath,
+  projectOverviewPath,
+  projectPath,
+  projectRequirementBreakdownReviewPath,
+  projectRequirementPath,
+  projectRequirementsPath,
+  projectTaskPath,
+  stripProjectPathPrefix,
+  useProjectPathBuilder
+} from "./lib/project-paths.js";
 import { createRequirementPreviewItems } from "./lib/ui-mapping.js";
 import { useProjectStore } from "./stores/project-store.js";
 import { useUIStore } from "./stores/ui-store.js";
@@ -69,16 +89,183 @@ function createTmpUuid(): string {
   return globalThis.crypto?.randomUUID?.() ?? `asset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function ProjectSelectionPage() {
+  const navigate = useNavigate();
+  const projects = useProjectStore((state) => state.projects);
+  const loadingProjects = useProjectStore((state) => state.loadingProjects);
+  const openModal = useUIStore((state) => state.openModal);
+  const syncSelectedProjectFromUrl = useProjectStore((state) => state.syncSelectedProjectFromUrl);
+
+  useEffect(() => {
+    syncSelectedProjectFromUrl(null);
+  }, [syncSelectedProjectFromUrl]);
+
+  return (
+    <div className={styles.projectSelection}>
+      <EmptyState
+        action={{ label: "创建项目", onClick: () => openModal("create-project") }}
+        description="请选择一个项目进入 Console。项目身份现在由 URL 固定，刷新和多标签页不会再互相覆盖。"
+        icon="⬡"
+        title="选择项目"
+      />
+      <div className={styles.projectSelectionList}>
+        {loadingProjects ? <div className={styles.projectSelectionHint}>正在加载项目...</div> : null}
+        {!loadingProjects && projects.length === 0 ? (
+          <div className={styles.projectSelectionHint}>还没有项目</div>
+        ) : null}
+        {projects.map((project) => (
+          <button
+            className={styles.projectSelectionItem}
+            key={project.id}
+            onClick={() => navigate(projectOverviewPath(project.id))}
+            type="button"
+          >
+            <span className={styles.projectSelectionName}>{project.name}</span>
+            <span className={styles.projectSelectionPath}>{project.localPath}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectMissingPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  return (
+    <EmptyState
+      description={projectId ? `URL 中的项目不存在或已被移除：${projectId}` : "URL 中缺少项目 ID。"}
+      icon="!"
+      title="项目不存在"
+    />
+  );
+}
+
+function ProjectScopeProvider() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const projects = useProjectStore((state) => state.projects);
+  const loadingProjects = useProjectStore((state) => state.loadingProjects);
+  const syncSelectedProjectFromUrl = useProjectStore((state) => state.syncSelectedProjectFromUrl);
+  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+
+  useEffect(() => {
+    syncSelectedProjectFromUrl(projectId ?? null);
+  }, [projectId, syncSelectedProjectFromUrl]);
+
+  if (!projectId) {
+    return <ProjectMissingPage />;
+  }
+  if (!project && loadingProjects) {
+    return <EmptyState description="正在确认 URL 中的项目身份。" icon="…" title="正在加载项目" />;
+  }
+  if (!project) {
+    return <ProjectMissingPage />;
+  }
+
+  return (
+    <ProjectScopeContext.Provider value={{ projectId, project }}>
+      <Outlet />
+    </ProjectScopeContext.Provider>
+  );
+}
+
+function LegacyRequirementRedirect() {
+  const { requirementId } = useParams<{ requirementId: string }>();
+  return (
+    <LegacyScopedRedirect
+      cacheKey={`requirement:${requirementId ?? ""}`}
+      resolveProjectId={async () => (requirementId ? await resolveRequirementProjectId(requirementId) : null)}
+      targetPath={(projectId) => (requirementId ? projectRequirementPath(projectId, requirementId) : "/")}
+    />
+  );
+}
+
+function LegacyRequirementBreakdownRedirect() {
+  const { requirementId } = useParams<{ requirementId: string }>();
+  return (
+    <LegacyScopedRedirect
+      cacheKey={`requirement-breakdown:${requirementId ?? ""}`}
+      resolveProjectId={async () => (requirementId ? await resolveRequirementProjectId(requirementId) : null)}
+      targetPath={(projectId) =>
+        requirementId ? projectRequirementBreakdownReviewPath(projectId, requirementId) : "/"
+      }
+    />
+  );
+}
+
+function LegacyTaskRedirect() {
+  const { taskId } = useParams<{ taskId: string }>();
+  return (
+    <LegacyScopedRedirect
+      cacheKey={`task:${taskId ?? ""}`}
+      resolveProjectId={async () => (taskId ? (await fetchTaskDetail(taskId)).projectId : null)}
+      targetPath={(projectId) => (taskId ? projectTaskPath(projectId, taskId) : "/")}
+    />
+  );
+}
+
+function LegacyDocumentRedirect() {
+  const { documentId } = useParams<{ documentId: string }>();
+  return (
+    <LegacyScopedRedirect
+      cacheKey={`document:${documentId ?? ""}`}
+      resolveProjectId={async () => (documentId ? (await fetchDocumentDetail(documentId)).projectId : null)}
+      targetPath={(projectId) => (documentId ? projectDocumentPath(projectId, documentId) : "/")}
+    />
+  );
+}
+
+function LegacyScopedRedirect(props: {
+  cacheKey: string;
+  resolveProjectId: () => Promise<string | null>;
+  targetPath: (projectId: string) => string;
+}) {
+  const [target, setTarget] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void props.resolveProjectId()
+      .then((projectId) => {
+        if (active) {
+          setTarget(projectId ? props.targetPath(projectId) : "/");
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setTarget("/");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [props.cacheKey]);
+
+  if (target) {
+    return <Navigate replace to={target} />;
+  }
+  return <EmptyState description="正在解析旧链接归属项目。" icon="…" title="正在跳转" />;
+}
+
+async function resolveRequirementProjectId(requirementId: string): Promise<string | null> {
+  const projects = await fetchProjects();
+  for (const project of projects) {
+    const requirements = await fetchRequirements(project.id).catch(() => []);
+    if (requirements.some((requirement) => requirement.id === requirementId)) {
+      return project.id;
+    }
+  }
+  return null;
+}
+
 function ConsoleLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const projects = useProjectStore((state) => state.projects);
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const loadingProjects = useProjectStore((state) => state.loadingProjects);
   const loadProjects = useProjectStore((state) => state.loadProjects);
   const silentRefreshProjects = useProjectStore((state) => state.silentRefreshProjects);
   const loadProjectData = useProjectStore((state) => state.loadProjectData);
-  const selectProject = useProjectStore((state) => state.selectProject);
   const createProject = useProjectStore((state) => state.createProject);
   const scanProject = useProjectStore((state) => state.scanProject);
   const createRequirement = useProjectStore((state) => state.createRequirement);
@@ -143,9 +330,10 @@ function ConsoleLayout() {
     };
   }, [hasSelectedProject, selectedProjectId, silentRefreshProjects, loadProjectData]);
 
-  const pageTitle = getPageTitle(location.pathname);
+  const projectRelativePathname = stripProjectPathPrefix(location.pathname);
+  const pageTitle = getPageTitle(projectRelativePathname);
   const pageHeaderActions = getHeaderActions({
-    pathname: location.pathname,
+    pathname: projectRelativePathname,
     hasProject: hasSelectedProject,
     onScan: async () => {
       try {
@@ -199,17 +387,7 @@ function ConsoleLayout() {
   };
 
   const handleSelectProject = (projectId: string) => {
-    selectProject(projectId);
-    if (location.pathname === "/" || location.pathname === "/overview") {
-      return;
-    }
-    if (location.pathname.startsWith("/documents/")) {
-      navigate("/documents");
-      return;
-    }
-    if (location.pathname.startsWith("/tasks/")) {
-      navigate("/tasks");
-    }
+    navigate(projectPath(projectId, projectSwitchTargetPath(projectRelativePathname)));
   };
 
   const handleCreateProject = async () => {
@@ -220,14 +398,14 @@ function ConsoleLayout() {
 
     setCreatingProject(true);
     try {
-      await createProject({
+      const createdProject = await createProject({
         ...projectForm,
         summary: projectForm.summary.trim()
       });
       resetProjectForm();
       closeModal();
       addToast("success", "项目创建成功");
-      navigate("/overview");
+      navigate(projectOverviewPath(createdProject.id));
     } catch (error) {
       addToast("error", error instanceof Error ? error.message : "创建项目失败");
     } finally {
@@ -280,7 +458,9 @@ function ConsoleLayout() {
       });
       handleCloseRequirementModal();
       addToast("success", "需求创建成功");
-      navigate("/requirements");
+      if (selectedProjectId) {
+        navigate(projectRequirementsPath(selectedProjectId));
+      }
     } catch (error) {
       addToast("error", error instanceof Error ? error.message : "创建需求失败");
     } finally {
@@ -328,70 +508,70 @@ function ConsoleLayout() {
         label: "打开概览",
         hint: "进入项目概览页",
         keywords: ["overview", "project"],
-        run: () => navigate("/overview")
+        run: () => navigate(toProjectPath("/overview"))
       },
       {
         id: "open-documents",
         label: "打开文档中心",
         hint: "查看项目文档索引",
         keywords: ["documents", "docs"],
-        run: () => navigate("/documents")
+        run: () => navigate(toProjectPath("/documents"))
       },
       {
         id: "open-tasks",
         label: "打开任务看板",
         hint: "查看任务阶段和详情",
         keywords: ["tasks", "kanban"],
-        run: () => navigate("/tasks")
+        run: () => navigate(toProjectPath("/tasks"))
       },
       {
         id: "open-my-work",
         label: "打开我的工作",
         hint: "需要处理 / 关注 / 最近活跃",
         keywords: ["my work", "inbox", "我的"],
-        run: () => navigate("/my-work")
+        run: () => navigate(toProjectPath("/my-work"))
       },
       {
         id: "open-sprints",
         label: "打开迭代",
         hint: "Sprint / 燃尽图",
         keywords: ["sprint", "迭代", "burndown"],
-        run: () => navigate("/sprints")
+        run: () => navigate(toProjectPath("/sprints"))
       },
       {
         id: "open-requirements",
         label: "打开需求管理",
         hint: "查看需求列表",
         keywords: ["requirements"],
-        run: () => navigate("/requirements")
+        run: () => navigate(toProjectPath("/requirements"))
       },
       {
         id: "open-runs",
         label: "打开运行记录",
         hint: "查看扫描和生成记录",
         keywords: ["runs"],
-        run: () => navigate("/runs")
+        run: () => navigate(toProjectPath("/runs"))
       },
       {
         id: "open-reconcile",
         label: "打开 Reconcile",
         hint: "查看 AI 自检与修复报告",
         keywords: ["reconcile", "drift", "repair"],
-        run: () => navigate("/reconcile")
+        run: () => navigate(toProjectPath("/reconcile"))
       },
       {
         id: "open-ai-cli",
         label: "打开 AI CLI",
         hint: "进入 AI CLI 工作区",
         keywords: ["ai", "cli"],
-        run: () => navigate("/ai-cli")
+        run: () => navigate(toProjectPath("/ai-cli"))
       },
       {
         id: "open-settings",
         label: "打开设置",
         hint: "配置当前项目扫描与解析规则",
         keywords: ["settings"],
-        run: () => navigate("/settings")
+        run: () => navigate(toProjectPath("/settings"))
       },
       {
         id: "scan-documents",
@@ -415,7 +595,7 @@ function ConsoleLayout() {
         keywords: ["create requirement"],
         disabled: !hasSelectedProject,
         run: () => {
-          navigate("/requirements");
+          navigate(toProjectPath("/requirements"));
           openModal("create-requirement");
         }
       },
@@ -425,17 +605,17 @@ function ConsoleLayout() {
         label: `📄 ${task.title}`,
         hint: `${task.taskKey} · ${task.currentNode ?? "?"} · ${task.progress}%`,
         keywords: [task.taskKey, task.title, task.kind ?? "subtask"],
-        run: () => navigate(`/tasks/${task.id}`)
+        run: () => navigate(toProjectPath(`/tasks/${task.id}`))
       })),
       ...requirementsForCommand.slice(0, 20).map((req) => ({
         id: `jump-requirement-${req.id}`,
         label: `📋 ${req.title}`,
         hint: `需求 · ${req.status}`,
         keywords: [req.title, "requirement", "需求"],
-        run: () => navigate(`/requirements/${req.id}`)
+        run: () => navigate(toProjectPath(`/requirements/${req.id}`))
       }))
     ],
-    [addToast, hasSelectedProject, navigate, openModal, scanProject, selectedProjectId, tasksForCommand, requirementsForCommand]
+    [addToast, hasSelectedProject, navigate, openModal, scanProject, tasksForCommand, requirementsForCommand, toProjectPath]
   );
 
   return (
@@ -453,7 +633,7 @@ function ConsoleLayout() {
       }
       sidebarCollapsed={sidebarCollapsed}
     >
-      <NotificationManager projectId={selectedProjectId} />
+      <NotificationManager projectId={hasSelectedProject ? selectedProjectId : null} />
       <Outlet />
 
       <Modal
@@ -687,6 +867,25 @@ function getPageTitle(pathname: string): string {
   return "项目概览";
 }
 
+function projectSwitchTargetPath(pathname: string): string {
+  if (pathname.startsWith("/documents/")) {
+    return "/documents";
+  }
+  if (pathname.startsWith("/tasks/")) {
+    return "/tasks";
+  }
+  if (pathname.startsWith("/requirements/")) {
+    return "/requirements";
+  }
+  if (pathname.startsWith("/sprints/")) {
+    return "/sprints";
+  }
+  if (pathname.startsWith("/ai-cli/recordings/")) {
+    return "/ai-cli";
+  }
+  return pathname === "/" ? "/overview" : pathname;
+}
+
 function getHeaderActions(input: {
   pathname: string;
   hasProject: boolean;
@@ -718,75 +917,105 @@ export default function App() {
           children: [
             {
               index: true,
-              element: <Navigate replace to="/overview" />
-            },
-            {
-              path: "overview",
-              element: <OverviewPage />
-            },
-            {
-              path: "documents",
-              element: <DocumentsPage />
-            },
-            {
-              path: "documents/:documentId",
-              element: <DocumentsPage />
-            },
-            {
-              path: "my-work",
-              element: <MyWorkPage />
-            },
-            {
-              path: "tasks",
-              element: <TasksPage />
-            },
-            {
-              path: "tasks/:taskId",
-              element: <TasksPage />
+              element: <ProjectSelectionPage />
             },
             {
               path: "requirements/:requirementId/breakdown-review",
-              element: <BreakdownReviewPage />
-            },
-            {
-              path: "requirements",
-              element: <RequirementsPage />
+              element: <LegacyRequirementBreakdownRedirect />
             },
             {
               path: "requirements/:requirementId",
-              element: <RequirementDetailPage />
+              element: <LegacyRequirementRedirect />
             },
             {
-              path: "sprints",
-              element: <SprintsPage />
+              path: "documents/:documentId",
+              element: <LegacyDocumentRedirect />
             },
             {
-              path: "sprints/:sprintId",
-              element: <SprintsPage />
+              path: "tasks/:taskId",
+              element: <LegacyTaskRedirect />
             },
             {
-              path: "runs",
-              element: <RunsPage />
+              path: "projects/:projectId",
+              element: <ProjectScopeProvider />,
+              children: [
+                {
+                  index: true,
+                  element: <Navigate replace to="overview" />
+                },
+                {
+                  path: "overview",
+                  element: <OverviewPage />
+                },
+                {
+                  path: "documents",
+                  element: <DocumentsPage />
+                },
+                {
+                  path: "documents/:documentId",
+                  element: <DocumentsPage />
+                },
+                {
+                  path: "my-work",
+                  element: <MyWorkPage />
+                },
+                {
+                  path: "tasks",
+                  element: <TasksPage />
+                },
+                {
+                  path: "tasks/:taskId",
+                  element: <TasksPage />
+                },
+                {
+                  path: "requirements/:requirementId/breakdown-review",
+                  element: <BreakdownReviewPage />
+                },
+                {
+                  path: "requirements",
+                  element: <RequirementsPage />
+                },
+                {
+                  path: "requirements/:requirementId",
+                  element: <RequirementDetailPage />
+                },
+                {
+                  path: "sprints",
+                  element: <SprintsPage />
+                },
+                {
+                  path: "sprints/:sprintId",
+                  element: <SprintsPage />
+                },
+                {
+                  path: "runs",
+                  element: <RunsPage />
+                },
+                {
+                  path: "reconcile",
+                  element: <ReconcileReportsPage />
+                },
+                {
+                  path: "settings",
+                  element: <SettingsPage />
+                },
+                {
+                  path: "anchors",
+                  element: <SlotsPage />
+                },
+                {
+                  path: "ai-cli",
+                  element: <AiCliPage />
+                },
+                {
+                  path: "ai-cli/recordings/:recordingId",
+                  element: <RecordingPlayPage />
+                }
+              ]
             },
             {
-              path: "reconcile",
-              element: <ReconcileReportsPage />
-            },
-            {
-              path: "settings",
-              element: <SettingsPage />
-            },
-            {
-              path: "anchors",
-              element: <SlotsPage />
-            },
-            {
-              path: "ai-cli",
-              element: <AiCliPage />
-            },
-            {
-              path: "ai-cli/recordings/:recordingId",
-              element: <RecordingPlayPage />
+              path: "*",
+              element: <Navigate replace to="/" />
             }
           ]
         }

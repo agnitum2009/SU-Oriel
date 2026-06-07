@@ -75,6 +75,7 @@ const fixedNow = new Date("2026-05-04T12:00:00.000");
 const projectId = "project-e12";
 const taskId = "task-impl";
 const projectRoot = "/tmp/su-ccb/e12-fixture";
+const scoped = (path: string) => `/projects/${projectId}${path}`;
 
 const project: ProjectView = {
   id: projectId,
@@ -460,7 +461,7 @@ describe("E12 acceptance DOM baselines", () => {
 });
 
 async function renderRoute(route: string, readyText: RegExp | string): Promise<HTMLElement> {
-  window.history.pushState({}, "", route);
+  window.history.pushState({}, "", scoped(route));
   const { container } = render(<App />);
   await waitFor(() => {
     expect(screen.queryAllByText(readyText).length).toBeGreaterThan(0);

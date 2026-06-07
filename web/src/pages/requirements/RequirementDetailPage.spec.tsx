@@ -247,11 +247,11 @@ function buildDocumentDetail(overrides: Partial<DocumentDetailView> = {}): Docum
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={["/requirements/req-1"]}>
+    <MemoryRouter initialEntries={["/projects/project-1/requirements/req-1"]}>
       <Routes>
-        <Route element={<RequirementDetailPage />} path="/requirements/:requirementId" />
-        <Route element={<div>拆分审查页</div>} path="/requirements/:requirementId/breakdown-review" />
-        <Route element={<div data-testid="task-detail-sentinel">任务详情页哨兵</div>} path="/tasks/:taskId" />
+        <Route element={<RequirementDetailPage />} path="/projects/:projectId/requirements/:requirementId" />
+        <Route element={<div>拆分审查页</div>} path="/projects/:projectId/requirements/:requirementId/breakdown-review" />
+        <Route element={<div data-testid="task-detail-sentinel">任务详情页哨兵</div>} path="/projects/:projectId/tasks/:taskId" />
       </Routes>
     </MemoryRouter>
   );
@@ -379,7 +379,7 @@ describe("RequirementDetailPage 极简详情页", () => {
     expect(within(slotRegion).getByRole("tab", { name: "claude" })).toHaveAttribute("aria-selected", "true");
     expect(within(slotRegion).getByRole("tab", { name: "codex" })).toHaveAttribute("aria-selected", "false");
     expect(within(slotRegion).getByTestId("slot-terminal-surface-claude")).toHaveTextContent("slot-3 · claude");
-    expect(within(slotRegion).getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/slots");
+    expect(within(slotRegion).getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/projects/project-1/anchors");
     expect(screen.queryByRole("region", { name: "Anchor 终端" })).not.toBeInTheDocument();
     expect(screen.queryByTestId("anchor-terminal-panel")).not.toBeInTheDocument();
     expect(screen.queryByText("暂停运行时")).not.toBeInTheDocument();
@@ -550,7 +550,7 @@ describe("RequirementDetailPage 极简详情页", () => {
     const slotRegion = await screen.findByRole("region", { name: "Slot 运行位置" });
     expect(await within(slotRegion).findByText("正在写 slot-3 的 claude")).toBeInTheDocument();
     expect(within(slotRegion).queryByRole("button", { name: "解绑 slot" })).not.toBeInTheDocument();
-    expect(within(slotRegion).getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/slots");
+    expect(within(slotRegion).getByRole("link", { name: "打开 Slots" })).toHaveAttribute("href", "/projects/project-1/anchors");
   });
 
   it("opens the AI analysis modal with the full requirement document and closes it", async () => {

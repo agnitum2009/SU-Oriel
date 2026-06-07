@@ -20,6 +20,7 @@ import {
   type SlotResizeDirection,
   type SlotShrinkEligibilitySummary
 } from "../../lib/console-api.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import styles from "./SlotsPage.module.css";
@@ -123,6 +124,7 @@ function queueTitle(item: SlotQueueItemView): string {
 
 export function SlotsPage() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const projects = useProjectStore((state) => state.projects);
   const addToast = useUIStore((state) => state.addToast);
@@ -477,7 +479,7 @@ export function SlotsPage() {
                       {slot.requirement ? (
                         <button
                           className={styles.linkButton}
-                          onClick={() => navigate(`/requirements/${slot.requirement?.id}`)}
+                          onClick={() => navigate(toProjectPath(`/requirements/${slot.requirement?.id}`))}
                           type="button"
                         >
                           {slot.requirement.id}

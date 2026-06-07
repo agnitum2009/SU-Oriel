@@ -16,6 +16,7 @@ import {
   fetchSprintDetail,
   fetchSprints
 } from "../../lib/console-api.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import type { BurndownView, SprintDetailView, SprintView } from "../../types/sprint.js";
@@ -41,6 +42,7 @@ export function SprintsPage() {
 
 function SprintList() {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const addToast = useUIStore((state) => state.addToast);
   const [sprints, setSprints] = useState<SprintView[]>([]);
@@ -135,7 +137,7 @@ function SprintList() {
               <button
                 aria-label={`打开迭代 ${sprint.name}`}
                 className={styles.card}
-                onClick={() => navigate(`/sprints/${sprint.id}`)}
+                onClick={() => navigate(toProjectPath(`/sprints/${sprint.id}`))}
                 type="button"
               >
                 <div className={styles.cardHead}>
@@ -164,6 +166,7 @@ function SprintList() {
 
 function SprintDetail({ sprintId }: { sprintId: string }) {
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const addToast = useUIStore((state) => state.addToast);
   const [detail, setDetail] = useState<SprintDetailView | null>(null);
   const [burndown, setBurndown] = useState<BurndownView | null>(null);
@@ -201,7 +204,7 @@ function SprintDetail({ sprintId }: { sprintId: string }) {
   return (
     <main aria-label="迭代详情" className={styles.page} data-testid="sprint-detail-page">
       <header className={styles.detailHeader}>
-        <button aria-label="返回迭代列表" className={styles.backBtn} onClick={() => navigate("/sprints")} type="button">
+        <button aria-label="返回迭代列表" className={styles.backBtn} onClick={() => navigate(toProjectPath("/sprints"))} type="button">
           ← 返回
         </button>
         <div>
@@ -235,7 +238,7 @@ function SprintDetail({ sprintId }: { sprintId: string }) {
                 <button
                   aria-label={`打开 ${task.title}`}
                   className={styles.taskRow}
-                  onClick={() => navigate(`/tasks/${task.id}`)}
+                  onClick={() => navigate(toProjectPath(`/tasks/${task.id}`))}
                   type="button"
                 >
                   <span className={styles.taskTitle}>{task.title}</span>

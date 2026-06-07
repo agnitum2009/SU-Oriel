@@ -32,6 +32,7 @@ import {
   uploadRequirementAsset
 } from "../../lib/console-api.js";
 import { stripFrontmatter } from "../../lib/markdown.js";
+import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { rewriteRequirementAssetUrls } from "../../lib/requirement-asset-url.js";
 import { getRequirementStatusBadge } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
@@ -336,6 +337,7 @@ function ArtifactCard({ testId, icon, title, statusLabel, statusTone, descriptio
 export function RequirementDetailPage() {
   const { requirementId } = useParams<{ requirementId: string }>();
   const navigate = useNavigate();
+  const toProjectPath = useProjectPathBuilder();
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const documents = useProjectStore((state) => state.documents);
   const addToast = useUIStore((state) => state.addToast);
@@ -1004,7 +1006,7 @@ export function RequirementDetailPage() {
   return (
     <main aria-label="需求详情" className={styles.page} data-testid="requirement-detail-page">
       <header className={styles.header}>
-        <button aria-label="返回需求列表" className={styles.backButton} onClick={() => navigate("/requirements")} type="button">
+        <button aria-label="返回需求列表" className={styles.backButton} onClick={() => navigate(toProjectPath("/requirements"))} type="button">
           <span aria-hidden="true">←</span>
           <span>返回需求列表</span>
         </button>
@@ -1156,7 +1158,7 @@ export function RequirementDetailPage() {
                 action={
                   <div className={styles.actionGroup}>
                     {breakdownReady ? (
-                      <Button onClick={() => navigate(`/requirements/${requirement.id}/breakdown-review`)} size="sm" variant="secondary">
+                      <Button onClick={() => navigate(toProjectPath(`/requirements/${requirement.id}/breakdown-review`))} size="sm" variant="secondary">
                         📂 打开审查页
                       </Button>
                     ) : null}
