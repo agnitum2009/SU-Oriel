@@ -305,6 +305,7 @@ export async function submitEventJournal(input: SubmitEventJournalInput): Promis
 
 export async function listEventJournal(query: ListEventJournalQuery): Promise<ListEventJournalResult> {
   const where: Prisma.EventJournalWhereInput = {
+    ...(query.project_id ? { projectId: query.project_id } : {}),
     ...(query.event_type ? { eventType: query.event_type } : {}),
     ...(query.subject_type ? { subjectType: query.subject_type } : {}),
     ...(query.subject_id ? { subjectId: query.subject_id } : {}),

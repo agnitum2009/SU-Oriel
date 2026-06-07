@@ -497,6 +497,62 @@ test("EventJournal dedupes only by event_id and keeps idempotency_key audit-only
   await app.close();
 });
 
+test("EventJournal query optionally filters by project_id", async () => {
+  const app = buildApp({
+    projectStore: new PrismaProjectStore(prisma)
+  });
+
+  await resetDatabase();
+  const fixture = await createTaskFixture();
+  const secondFixture = await createTaskFixture();
+  const firstEventId = randomUUID();
+  const secondEventId = randomUUID();
+
+  const firstResponse = await app.inject({
+    method: "POST",
+    url: "/api/event-journal/events",
+    payload: buildEventPayload(fixture.taskId, firstEventId, "2026-04-28T00:00:00.000Z")
+  });
+  assert.equal(firstResponse.statusCode, 201, firstResponse.body);
+  const secondResponse = await app.inject({
+    method: "POST",
+    url: "/api/event-journal/events",
+    payload: buildEventPayload(secondFixture.taskId, secondEventId, "2026-04-28T00:01:00.000Z")
+  });
+  assert.equal(secondResponse.statusCode, 201, secondResponse.body);
+
+  const unscopedResponse = await app.inject({
+    method: "GET",
+    url: "/api/event-journal/events?event_type=codex_receipt_ready"
+  });
+  assert.equal(unscopedResponse.statusCode, 200);
+  assert.equal(unscopedResponse.json().pageInfo.count, 2);
+  assert.deepEqual(
+    new Set(unscopedResponse.json().items.map((item: { projectId: string }) => item.projectId)),
+    new Set([fixture.projectId, secondFixture.projectId])
+  );
+
+  const firstProjectResponse = await app.inject({
+    method: "GET",
+    url: `/api/event-journal/events?project_id=${fixture.projectId}&event_type=codex_receipt_ready`
+  });
+  assert.equal(firstProjectResponse.statusCode, 200);
+  assert.equal(firstProjectResponse.json().pageInfo.count, 1);
+  assert.equal(firstProjectResponse.json().items[0].eventId, firstEventId);
+  assert.equal(firstProjectResponse.json().items[0].projectId, fixture.projectId);
+
+  const secondProjectResponse = await app.inject({
+    method: "GET",
+    url: `/api/event-journal/events?project_id=${secondFixture.projectId}&event_type=codex_receipt_ready`
+  });
+  assert.equal(secondProjectResponse.statusCode, 200);
+  assert.equal(secondProjectResponse.json().pageInfo.count, 1);
+  assert.equal(secondProjectResponse.json().items[0].eventId, secondEventId);
+  assert.equal(secondProjectResponse.json().items[0].projectId, secondFixture.projectId);
+
+  await app.close();
+});
+
 test("EventJournal query filters by task, type, emitted range, limit, and offset", async () => {
   const app = buildApp({
     projectStore: new PrismaProjectStore(prisma)

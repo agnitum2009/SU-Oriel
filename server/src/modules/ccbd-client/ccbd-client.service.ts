@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import net from "node:net";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import posix from "node:path/posix";
 
 import {
@@ -41,12 +41,14 @@ const RESERVED_AGENT_NAMES = new Set([
   "help"
 ]);
 
-interface CcbdClientOptions {
-  projectRoot?: string;
-  socketPath?: string;
+type CcbdClientScopeOptions =
+  | { projectRoot: string; socketPath?: string; anchorSocketResolver?: CcbdAnchorSocketResolver }
+  | { socketPath: string; projectRoot?: string; anchorSocketResolver?: CcbdAnchorSocketResolver }
+  | { anchorSocketResolver: CcbdAnchorSocketResolver; projectRoot?: string; socketPath?: string };
+
+export type CcbdClientServiceOptions = CcbdClientScopeOptions & {
   timeoutMs?: number;
-  anchorSocketResolver?: CcbdAnchorSocketResolver;
-}
+};
 
 function normalizeAgentName(agentName: string): string {
   const normalized = agentName.trim().toLowerCase();
@@ -83,7 +85,7 @@ function readSocketPathFromJson(filePath: string): string | null {
 import { resolveCcbProjectRoot } from "../../lib/project-root.js";
 export { resolveCcbProjectRoot };
 
-export function resolveCcbdSocketPath(projectRoot = resolveCcbProjectRoot()): string {
+export function resolveCcbdSocketPath(projectRoot: string): string {
   const explicit = process.env.CCB_CCBD_SOCKET_PATH?.trim();
   if (explicit) {
     return explicit;
@@ -100,7 +102,7 @@ export function resolveCcbdSocketPath(projectRoot = resolveCcbProjectRoot()): st
   return join(ccbdDir, "ccbd.sock");
 }
 
-export function computeCcbProjectId(projectRoot = resolveCcbProjectRoot()): string {
+export function computeCcbProjectId(projectRoot: string): string {
   let normalized = projectRoot;
   try {
     normalized = realpathSync(projectRoot);
@@ -111,17 +113,29 @@ export function computeCcbProjectId(projectRoot = resolveCcbProjectRoot()): stri
   return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
+function inferProjectRootFromExplicitSocket(socketPath: string): string {
+  const socketDir = dirname(resolve(socketPath));
+  if (basename(socketDir) === "ccbd" && basename(dirname(socketDir)) === ".ccb") {
+    return dirname(dirname(socketDir));
+  }
+  return socketDir;
+}
+
 export class CcbdClientService implements CcbdClientServiceLike {
-  readonly projectRoot: string;
-  readonly projectId: string;
-  private readonly socketPath: string;
+  readonly projectRoot: string | null;
+  readonly projectId: string | null;
+  private readonly socketPath: string | null;
   private readonly timeoutMs: number;
   private readonly anchorSocketResolver?: CcbdAnchorSocketResolver;
 
-  constructor(options: CcbdClientOptions = {}) {
-    this.projectRoot = options.projectRoot ? resolve(options.projectRoot) : resolveCcbProjectRoot();
-    this.projectId = computeCcbProjectId(this.projectRoot);
-    this.socketPath = options.socketPath ?? resolveCcbdSocketPath(this.projectRoot);
+  constructor(options: CcbdClientServiceOptions) {
+    this.projectRoot = options.projectRoot ? resolve(options.projectRoot) : null;
+    this.projectId = this.projectRoot
+      ? computeCcbProjectId(this.projectRoot)
+      : options.socketPath
+        ? computeCcbProjectId(inferProjectRootFromExplicitSocket(options.socketPath))
+        : null;
+    this.socketPath = options.socketPath ?? (this.projectRoot ? resolveCcbdSocketPath(this.projectRoot) : null);
     this.timeoutMs = options.timeoutMs ?? 3000;
     this.anchorSocketResolver = options.anchorSocketResolver;
   }
@@ -137,7 +151,8 @@ export class CcbdClientService implements CcbdClientServiceLike {
       payload.terminal_width = terminalSize.width;
       payload.terminal_height = terminalSize.height;
     }
-    const response = await this.request("start", payload, this.socketPath);
+    const route = this.resolveDefaultRoute();
+    const response = await this.request("start", payload, route.socketPath);
     return {
       started: Array.isArray(response.started) ? response.started.map(String) : undefined,
       socketPath: typeof response.socket_path === "string" ? response.socket_path : undefined,
@@ -191,11 +206,13 @@ export class CcbdClientService implements CcbdClientServiceLike {
   }
 
   async ping(target = "ccbd"): Promise<Record<string, unknown>> {
-    return await this.request("ping", { target }, this.socketPath);
+    const route = this.resolveDefaultRoute();
+    return await this.request("ping", { target }, route.socketPath);
   }
 
   async projectView(): Promise<CcbdProjectView> {
-    const response = await this.request("project_view", { schema_version: 1 }, this.socketPath);
+    const route = this.resolveDefaultRoute();
+    const response = await this.request("project_view", { schema_version: 1 }, route.socketPath);
     const view = response.view;
     if (!view || typeof view !== "object" || Array.isArray(view)) {
       throw new ProtocolError("ccbd project_view response missing view");
@@ -203,12 +220,22 @@ export class CcbdClientService implements CcbdClientServiceLike {
     return view as CcbdProjectView;
   }
 
+  private resolveDefaultRoute(): { socketPath: string; projectId: string } {
+    if (!this.socketPath) {
+      throw new CcbdUnavailableError("ccbd default socket unavailable; construct with projectRoot or socketPath");
+    }
+    if (!this.projectId) {
+      throw new ProtocolError("ccbd project_id unavailable; construct with projectRoot or use anchorSocketResolver with anchor project metadata");
+    }
+    return {
+      socketPath: this.socketPath,
+      projectId: this.projectId
+    };
+  }
+
   private async resolveRequestRoute(anchorId?: string): Promise<{ socketPath: string; projectId: string }> {
     if (!anchorId) {
-      return {
-        socketPath: this.socketPath,
-        projectId: this.projectId
-      };
+      return this.resolveDefaultRoute();
     }
 
     const anchor = await this.anchorSocketResolver?.(anchorId);
@@ -216,9 +243,15 @@ export class CcbdClientService implements CcbdClientServiceLike {
     if (!socketPath) {
       throw new AnchorSocketNotReadyError(anchorId);
     }
+    const projectId = anchor?.anchorPath
+      ? computeCcbProjectId(anchor.anchorPath)
+      : anchor?.projectId ?? this.projectId;
+    if (!projectId) {
+      throw new ProtocolError("ccbd anchor route missing project_id");
+    }
     return {
       socketPath,
-      projectId: anchor?.anchorPath ? computeCcbProjectId(anchor.anchorPath) : anchor?.projectId ?? this.projectId
+      projectId
     };
   }
 

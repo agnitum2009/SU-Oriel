@@ -359,6 +359,7 @@ export const submitEventJournalSchema = emitEventSchema;
 
 export const listEventJournalQuerySchema = z
   .object({
+    project_id: nonEmptyStringSchema.optional(),
     subject_type: z.enum(["requirement", "subtask"]).optional(),
     subject_id: nonEmptyStringSchema.optional(),
     task_id: nonEmptyStringSchema.optional(),
