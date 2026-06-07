@@ -36,6 +36,21 @@
   color: #92400e;
 }
 
+.retryButton {
+  justify-self: start;
+  padding: 6px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: var(--gray-0, #fff);
+  color: var(--gray-700);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.retryButton:hover {
+  background: var(--gray-100);
+}
+
 .writeWarning {
   margin: 0;
   padding: 8px 10px;

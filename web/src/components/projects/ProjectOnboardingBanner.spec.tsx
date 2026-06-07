@@ -37,7 +37,7 @@ describe("ProjectOnboardingBanner", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
-    useUIStore.setState({ toasts: [] });
+    useUIStore.setState({ toasts: [], mainTerminalOpenRequest: null });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
@@ -152,6 +152,51 @@ describe("ProjectOnboardingBanner", () => {
 
     await waitFor(() => expect(consoleApi.initProjectKnowledgeBase).toHaveBeenCalledWith("project-yellow"));
     expect(await screen.findByText(/初始化中（jobId: job-su-init）/)).toBeInTheDocument();
+    expect(useUIStore.getState().mainTerminalOpenRequest).toEqual({ projectId: "project-yellow" });
+  });
+
+  it("requests the main terminal modal when re-initializing from the ready state", async () => {
+    vi.mocked(consoleApi.fetchProjectOnboardingStatus).mockResolvedValue(
+      status({ projectId: "project-reinit", ccbRuntimeReady: true, knowledgeBaseReady: true })
+    );
+    vi.mocked(consoleApi.initProjectKnowledgeBase).mockResolvedValue({
+      jobId: "job-reinit",
+      claudeAgentName: "project_claude",
+      submittedAt: "2026-05-20T00:00:00.000Z"
+    });
+    vi.mocked(consoleApi.fetchProjectInitJobStatus).mockResolvedValue({
+      jobId: "job-reinit",
+      status: "running",
+      updatedAt: "2026-05-20T00:00:03.000Z"
+    });
+
+    render(<ProjectOnboardingBanner projectId="project-reinit" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新初始化知识库" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认初始化" }));
+
+    await waitFor(() => expect(consoleApi.initProjectKnowledgeBase).toHaveBeenCalledWith("project-reinit"));
+    await waitFor(() =>
+      expect(useUIStore.getState().mainTerminalOpenRequest).toEqual({ projectId: "project-reinit" })
+    );
+  });
+
+  it("does not request the main terminal modal when init submit fails", async () => {
+    vi.mocked(consoleApi.fetchProjectOnboardingStatus).mockResolvedValue(
+      status({ projectId: "project-submit-failed", ccbRuntimeReady: true, knowledgeBaseReady: false })
+    );
+    vi.mocked(consoleApi.initProjectKnowledgeBase).mockRejectedValue(new Error("ccbd unreachable"));
+
+    render(<ProjectOnboardingBanner projectId="project-submit-failed" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "一键初始化知识库" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认初始化" }));
+
+    await waitFor(() =>
+      expect(useUIStore.getState().toasts.some((toast) => toast.message === "ccbd unreachable")).toBe(true)
+    );
+    expect(useUIStore.getState().mainTerminalOpenRequest).toBeNull();
+    expect(screen.getByRole("dialog", { name: "初始化知识库" })).toBeInTheDocument();
   });
 
   it("polls every 3s and turns green when the knowledge base becomes ready", async () => {

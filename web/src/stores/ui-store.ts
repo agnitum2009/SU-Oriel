@@ -60,6 +60,8 @@ interface UIStore {
   slidePanelContent: { type: "task"; taskId: string } | null;
   modalOpen: boolean;
   modalType: "create-project" | "create-requirement" | "ai-cli-settings" | null;
+  /** main 终端弹窗打开请求(请求-消费通道,独立于 modalOpen/modalType 互斥机制)。 */
+  mainTerminalOpenRequest: { projectId: string } | null;
   toasts: ToastItem[];
   anchorResetEpochs: Record<string, number>;
   notificationSettings: NotificationSettings;
@@ -69,6 +71,8 @@ interface UIStore {
   closeSlidePanel: () => void;
   openModal: (type: UIStore["modalType"]) => void;
   closeModal: () => void;
+  requestOpenMainTerminal: (projectId: string) => void;
+  clearMainTerminalOpenRequest: () => void;
   addToast: (type: ToastItem["type"], message: string) => void;
   removeToast: (id: string) => void;
   bumpAnchorResetEpoch: (taskId: string) => void;
@@ -82,6 +86,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   slidePanelContent: null,
   modalOpen: false,
   modalType: null,
+  mainTerminalOpenRequest: null,
   toasts: [],
   anchorResetEpochs: {},
   notificationSettings: loadNotificationSettings(),
@@ -116,6 +121,12 @@ export const useUIStore = create<UIStore>()((set) => ({
       modalOpen: false,
       modalType: null
     });
+  },
+  requestOpenMainTerminal: (projectId) => {
+    set({ mainTerminalOpenRequest: { projectId } });
+  },
+  clearMainTerminalOpenRequest: () => {
+    set({ mainTerminalOpenRequest: null });
   },
   addToast: (type, message) => {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;

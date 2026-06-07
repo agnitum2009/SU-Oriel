@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
@@ -7,6 +7,8 @@ import type { SlotProjectionView } from "../../lib/console-api.js";
 import type { SlotTerminalDescriptor } from "../../types/slot-terminal.js";
 import type { SlotTerminalWebSocketLike } from "../../lib/slot-terminal-ws.js";
 import { useProjectStore } from "../../stores/project-store.js";
+import { useUIStore } from "../../stores/ui-store.js";
+import { ProjectOnboardingBanner } from "../projects/ProjectOnboardingBanner.js";
 import { SlotRequirementsFab } from "../slot-requirements-fab/SlotRequirementsFab.js";
 import fabStyles from "../slot-requirements-fab/SlotRequirementsFab.module.css";
 import { MainTerminalLauncher } from "./MainTerminalLauncher.js";
@@ -61,10 +63,19 @@ vi.mock("@xterm/addon-web-links", () => ({
 vi.mock("../../lib/console-api.js", () => ({
   resolveApiBaseUrl: vi.fn(() => ""),
   fetchSlots: vi.fn(),
-  fetchTerminalDescriptor: vi.fn()
+  fetchTerminalDescriptor: vi.fn(),
+  fetchProjectInitJobStatus: vi.fn(),
+  fetchProjectOnboardingStatus: vi.fn(),
+  initProjectKnowledgeBase: vi.fn(),
+  spawnMainTerminal: vi.fn()
 }));
 
-import { fetchSlots, fetchTerminalDescriptor } from "../../lib/console-api.js";
+import {
+  fetchProjectOnboardingStatus,
+  fetchSlots,
+  fetchTerminalDescriptor,
+  initProjectKnowledgeBase
+} from "../../lib/console-api.js";
 
 class MockSlotTerminalWebSocket implements SlotTerminalWebSocketLike {
   static instances: MockSlotTerminalWebSocket[] = [];
@@ -154,10 +165,12 @@ beforeEach(() => {
   vi.mocked(fetchSlots).mockResolvedValue(projection());
   vi.mocked(fetchTerminalDescriptor).mockResolvedValue(descriptor);
   useProjectStore.setState({ selectedProjectId: "p1" });
+  useUIStore.setState({ toasts: [], mainTerminalOpenRequest: null });
 });
 
 afterEach(() => {
   useProjectStore.setState({ selectedProjectId: null });
+  useUIStore.setState({ mainTerminalOpenRequest: null });
 });
 
 describe("MainTerminalLauncher", () => {
@@ -211,6 +224,117 @@ describe("MainTerminalLauncher", () => {
 
     expect(await screen.findByText("main 会话未启动，请在 ccb 启动后重试")).toBeInTheDocument();
     expect(MockSlotTerminalWebSocket.instances).toHaveLength(0);
+  });
+
+  it("opens the modal from a ui-store request and clears the request", async () => {
+    render(
+      <MemoryRouter>
+        <MainTerminalLauncher webSocketFactory={MockSlotTerminalWebSocket} />
+      </MemoryRouter>
+    );
+    await screen.findByLabelText("main agent 组终端快捷入口");
+
+    act(() => {
+      useUIStore.getState().requestOpenMainTerminal("p1");
+    });
+
+    expect(await screen.findByRole("dialog", { name: "main agent 组终端" })).toBeInTheDocument();
+    expect(useUIStore.getState().mainTerminalOpenRequest).toBeNull();
+  });
+
+  it("discards a ui-store request for a different project without opening", async () => {
+    render(
+      <MemoryRouter>
+        <MainTerminalLauncher webSocketFactory={MockSlotTerminalWebSocket} />
+      </MemoryRouter>
+    );
+    await screen.findByLabelText("main agent 组终端快捷入口");
+
+    act(() => {
+      useUIStore.getState().requestOpenMainTerminal("p2");
+    });
+
+    await waitFor(() => expect(useUIStore.getState().mainTerminalOpenRequest).toBeNull());
+    expect(screen.queryByRole("dialog", { name: "main agent 组终端" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the modal open when a duplicate request arrives", async () => {
+    render(
+      <MemoryRouter>
+        <MainTerminalLauncher webSocketFactory={MockSlotTerminalWebSocket} />
+      </MemoryRouter>
+    );
+    await screen.findByLabelText("main agent 组终端快捷入口");
+
+    act(() => {
+      useUIStore.getState().requestOpenMainTerminal("p1");
+    });
+    expect(await screen.findByRole("dialog", { name: "main agent 组终端" })).toBeInTheDocument();
+
+    act(() => {
+      useUIStore.getState().requestOpenMainTerminal("p1");
+    });
+
+    expect(await screen.findByRole("dialog", { name: "main agent 组终端" })).toBeInTheDocument();
+    await waitFor(() => expect(useUIStore.getState().mainTerminalOpenRequest).toBeNull());
+  });
+
+  it("auto-opens the main terminal modal after init confirm succeeds (banner integration)", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchProjectOnboardingStatus).mockResolvedValue({
+      projectId: "p1",
+      localPath: "/tmp/p1",
+      ccbRuntimeReady: true,
+      knowledgeBaseReady: false,
+      ccbConfigPath: "/tmp/p1/.ccb/ccb.config",
+      knowledgeBaseRootPath: "/tmp/p1/docs/.ccb/index",
+      manualCommand: "cd /tmp/p1 && ccb",
+      checkedAt: "2026-05-20T00:00:00.000Z"
+    });
+    vi.mocked(initProjectKnowledgeBase).mockResolvedValue({
+      jobId: "job-auto-open",
+      claudeAgentName: "project_claude",
+      submittedAt: "2026-05-20T00:00:00.000Z"
+    });
+
+    render(
+      <MemoryRouter>
+        <ProjectOnboardingBanner projectId="p1" />
+        <MainTerminalLauncher webSocketFactory={MockSlotTerminalWebSocket} />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByRole("button", { name: "一键初始化知识库" }));
+    await user.click(screen.getByRole("button", { name: "确认初始化" }));
+
+    const terminalDialog = await screen.findByRole("dialog", { name: "main agent 组终端" });
+    expect(screen.queryByRole("dialog", { name: "初始化知识库" })).not.toBeInTheDocument();
+    await waitFor(() => expect(useUIStore.getState().mainTerminalOpenRequest).toBeNull());
+    const closeButton = terminalDialog.querySelector("button[aria-label='关闭']");
+    expect(closeButton).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(closeButton));
+  });
+
+  it("shows a retry button in the fallback state and resolves the terminal after retry", async () => {
+    vi.mocked(fetchTerminalDescriptor)
+      .mockRejectedValueOnce(new Error("slot terminal unavailable"))
+      .mockResolvedValueOnce(descriptor);
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <MainTerminalLauncher webSocketFactory={MockSlotTerminalWebSocket} />
+      </MemoryRouter>
+    );
+
+    await user.click(await screen.findByLabelText("main agent 组终端快捷入口"));
+
+    expect(await screen.findByText("main 会话未启动，请在 ccb 启动后重试")).toBeInTheDocument();
+    expect(MockSlotTerminalWebSocket.instances).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "重试" }));
+
+    expect(await screen.findByTestId("main-terminal-surface-wrap")).toBeInTheDocument();
+    await waitFor(() => expect(MockSlotTerminalWebSocket.instances.length).toBeGreaterThan(0));
   });
 
   it("coexists with the slot requirements FAB and applies the terminal modal scroll-layer class", async () => {

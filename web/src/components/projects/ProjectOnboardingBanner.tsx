@@ -45,6 +45,7 @@ function formatTerminalSpawnFailure(result: AnchorNativeTerminalSpawnResult): st
 
 export function ProjectOnboardingBanner({ projectId }: ProjectOnboardingBannerProps) {
   const addToast = useUIStore((state) => state.addToast);
+  const requestOpenMainTerminal = useUIStore((state) => state.requestOpenMainTerminal);
   const [status, setStatus] = useState<ProjectOnboardingStatusView | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -179,6 +180,8 @@ export function ProjectOnboardingBanner({ projectId }: ProjectOnboardingBannerPr
         startedAt: Date.now()
       });
       setConfirmOpen(false);
+      // 提交成功后主动弹出 main 终端弹窗,让用户直观看到 su-init 执行过程;失败路径不发请求。
+      requestOpenMainTerminal(projectId);
     } catch (error) {
       addToast("error", error instanceof Error ? error.message : "初始化项目知识库失败");
     } finally {

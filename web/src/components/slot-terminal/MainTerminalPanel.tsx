@@ -29,6 +29,7 @@ type ResolverState =
 
 export function MainTerminalPanel(props: MainTerminalPanelProps) {
   const [resolverState, setResolverState] = useState<ResolverState>({ status: "idle" });
+  const [resolverEpoch, setResolverEpoch] = useState(0);
   const [activeRole, setActiveRole] = useState<SlotTerminalPaneRole>("claude");
   const target = useMemo<SlotTerminalTarget>(
     () => ({
@@ -68,7 +69,7 @@ export function MainTerminalPanel(props: MainTerminalPanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.projectId, target]);
+  }, [props.projectId, resolverEpoch, target]);
 
   const panesByRole = useMemo(() => {
     const panes = resolverState.status === "ready" ? resolverState.descriptor.panes : [];
@@ -80,7 +81,18 @@ export function MainTerminalPanel(props: MainTerminalPanelProps) {
       <div className={styles.panel} data-testid="main-terminal-panel">
         <p className={styles.primary}>main · {props.mainState ?? "unknown"}</p>
         <p className={styles.text}>{resolverState.status === "loading" ? "正在解析 main 终端..." : "main agent 组终端"}</p>
-        {resolverState.status === "fallback" ? <p className={styles.fallbackReason}>{resolverState.message}</p> : null}
+        {resolverState.status === "fallback" ? (
+          <>
+            <p className={styles.fallbackReason}>{resolverState.message}</p>
+            <button
+              className={styles.retryButton}
+              onClick={() => setResolverEpoch((epoch) => epoch + 1)}
+              type="button"
+            >
+              重试
+            </button>
+          </>
+        ) : null}
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSlots } from "../../lib/console-api.js";
 import type { SlotTerminalWebSocketFactory } from "../../lib/slot-terminal-ws.js";
 import { useProjectStore } from "../../stores/project-store.js";
+import { useUIStore } from "../../stores/ui-store.js";
 import { Modal } from "../ui/Modal.js";
 import { MainTerminalPanel } from "../slot-terminal/MainTerminalPanel.js";
 import styles from "./MainTerminalLauncher.module.css";
@@ -15,6 +16,8 @@ export interface MainTerminalLauncherProps {
 
 export function MainTerminalLauncher(props: MainTerminalLauncherProps) {
   const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
+  const openRequest = useUIStore((state) => state.mainTerminalOpenRequest);
+  const clearMainTerminalOpenRequest = useUIStore((state) => state.clearMainTerminalOpenRequest);
   const [open, setOpen] = useState(false);
   const [mainState, setMainState] = useState<MainState>("loading");
   const requestRef = useRef(0);
@@ -47,6 +50,18 @@ export function MainTerminalLauncher(props: MainTerminalLauncherProps) {
       void loadMainState();
     }
   }, [loadMainState, selectedProjectId]);
+
+  // 消费 ui-store 的打开请求(如 banner 确认初始化成功后发出);projectId 不匹配时丢弃,两路均清除请求。
+  useEffect(() => {
+    if (!openRequest) {
+      return;
+    }
+    if (openRequest.projectId === selectedProjectId) {
+      void loadMainState();
+      setOpen(true);
+    }
+    clearMainTerminalOpenRequest();
+  }, [clearMainTerminalOpenRequest, loadMainState, openRequest, selectedProjectId]);
 
   const openModal = () => {
     void loadMainState();
