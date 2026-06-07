@@ -20,8 +20,6 @@ const EVENT_KIND_LABEL: Record<string, string> = {
   verification_finished: "验证完成",
   batch_cancelled: "Batch 取消",
   tool_call_denied: "Tool 调用拒绝",
-  workspace_created: "Workspace 创建",
-  workspace_cleaned: "Workspace 清理",
   intent_pending: "Intent pending",
   intent_consumed: "Intent consumed",
   consult: "Consult 协商",
@@ -73,6 +71,7 @@ export function NodeActivityFeed({ taskId, nodeId, onOpenFullTimeline }: NodeAct
   const filtered = useMemo(() => {
     return events
       .filter((event) => {
+        if (event.event_type.startsWith("workspace_")) return false;
         const en = eventNodeId(event);
         return !en || en === nodeId;
       })

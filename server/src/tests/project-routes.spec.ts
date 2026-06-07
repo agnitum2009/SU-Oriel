@@ -642,7 +642,7 @@ async function testProjectDocumentTaskAndRequirementFlow(): Promise<void> {
   assert.equal(taskDetailResponse.statusCode, 200);
   assert.equal(taskDetailResponse.json().linkedDocuments.length, 1);
   assert.equal(taskDetailResponse.json().linkedRequirement, null);
-  assert.deepEqual(taskDetailResponse.json().workspaces, []);
+  assert.equal("workspaces" in taskDetailResponse.json(), false);
   assert.equal(taskDetailResponse.json().reviewStatus, "passed");
   assert.deepEqual(taskDetailResponse.json().verificationResult, {
     build: "passed",
@@ -726,14 +726,6 @@ async function testProjectDocumentTaskAndRequirementFlow(): Promise<void> {
 
   assert.equal(workspaceResponse.statusCode, 410);
   assert.match(workspaceResponse.json().message, /工作区建删入口已关闭/);
-
-  const workspaceListResponse = await app.inject({
-    method: "GET",
-    url: `/api/tasks/${taskId}/workspaces`
-  });
-
-  assert.equal(workspaceListResponse.statusCode, 200);
-  assert.equal(workspaceListResponse.json().items.length, 0);
 
   const duplicateWorkspaceResponse = await app.inject({
     method: "POST",
@@ -1165,7 +1157,7 @@ async function testRequirementTaskRetiredWorkspaceAndIntentIntegration(): Promis
   });
   assert.equal(taskDetailResponse.statusCode, 200);
   assert.equal(taskDetailResponse.json().linkedRequirement.id, requirementResponse.json().id);
-  assert.equal(taskDetailResponse.json().workspaces.length, 0);
+  assert.equal("workspaces" in taskDetailResponse.json(), false);
   assert.equal(taskDetailResponse.json().reviewIntents.length, 1);
 
   const timelineResponse = await app.inject({

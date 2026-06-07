@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { Document, Requirement, ReviewIntent, Task, TaskWorkspace } from "@prisma/client";
+import type { Document, Requirement, ReviewIntent, Task } from "@prisma/client";
 
 import { prisma } from "../../db/prisma.js";
 import { buildEventJournalTimelineEvents } from "../events/event-journal.service.js";
@@ -19,7 +19,6 @@ import {
   listReviewIntentQuerySchema,
   updateTaskSchema
 } from "./task.schemas.js";
-import { serializeWorkspace } from "../workspace/workspace.routes.js";
 import { AnchorDispatchQueuePolicyError } from "../anchor-broker/anchor-dispatch-queue-policy.js";
 import { JobSlotRouter } from "../slot-binding/job-slot-router.js";
 import {
@@ -419,37 +418,6 @@ function buildDevTaskTimelineEvents(devTaskDocument: Document | null): TimelineE
   return events;
 }
 
-function buildWorkspaceTimelineEvents(workspaces: TaskWorkspace[]): TimelineEvent[] {
-  return workspaces.flatMap((workspace) => {
-    const events: TimelineEvent[] = [
-      {
-        kind: "workspace_create",
-        at: workspace.createdAt.toISOString(),
-        label: "Workspace created",
-        details: {
-          branchName: workspace.branchName,
-          workspacePath: workspace.workspacePath,
-          status: workspace.status
-        }
-      }
-    ];
-
-    if (workspace.status === "cleaned") {
-      events.push({
-        kind: "workspace_cleanup",
-        at: workspace.updatedAt.toISOString(),
-        label: "Workspace cleaned",
-        details: {
-          branchName: workspace.branchName,
-          workspacePath: workspace.workspacePath
-        }
-      });
-    }
-
-    return events;
-  });
-}
-
 function buildReviewIntentTimelineEvents(intents: ReviewIntent[]): TimelineEvent[] {
   return intents.flatMap((intent) => {
     const events: TimelineEvent[] = [
@@ -551,14 +519,6 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
         id: task.requirementId ?? "__no_requirement__"
       }
     });
-    const workspaces = await prisma.taskWorkspace.findMany({
-      where: {
-        taskId: task.id
-      },
-      orderBy: {
-        createdAt: "desc"
-      }
-    });
     const reviewIntents = await prisma.reviewIntent.findMany({
       where: {
         taskId: task.id
@@ -598,7 +558,6 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
         title: document.title,
         status: document.status
       })),
-      workspaces: workspaces.map((workspace) => serializeWorkspace(workspace)),
       updatedAt: task.updatedAt.toISOString()
     };
   });
@@ -618,7 +577,7 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
       };
     }
 
-    const [devTaskDocument, workspaces, reviewIntents, eventJournalEvents] = await Promise.all([
+    const [devTaskDocument, reviewIntents, eventJournalEvents] = await Promise.all([
       prisma.document.findFirst({
         where: {
           projectId: task.projectId,
@@ -627,11 +586,6 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
         },
         orderBy: {
           path: "asc"
-        }
-      }),
-      prisma.taskWorkspace.findMany({
-        where: {
-          taskId: task.id
         }
       }),
       prisma.reviewIntent.findMany({
@@ -646,7 +600,6 @@ export async function registerTaskRoutes(app: FastifyInstance): Promise<void> {
       taskId: task.id,
       events: sortTimelineEvents([
         ...buildDevTaskTimelineEvents(devTaskDocument),
-        ...buildWorkspaceTimelineEvents(workspaces),
         ...buildReviewIntentTimelineEvents(reviewIntents),
         ...eventJournalEvents
       ]).map((event) => serializeTimelineEvent(event))
