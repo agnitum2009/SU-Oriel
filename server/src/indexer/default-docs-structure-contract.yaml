@@ -15,28 +15,36 @@ human_docs:
   entries:
     - path: "00_项目总览.md"
       doc_type: project_overview
+      template: _模板_项目总览.md
     - path: "00_文档地图.md"
       doc_type: doc_map
+      template: _模板_文档地图.md      # 模板=输出格式参考(非手填)
       maintained_by: generated         # 由 indexer 自动生成
       status_derived_from: [文档位置(是否在 99_归档), 绑定实体(需求/任务/ADR)状态]  # 派生,不是每文档存的 status 字段
     - path: "01_架构设计/"
       doc_types: [architecture]
+      template: _模板_架构.md
       split_by_part: true             # 多独立项目 → 前端架构/后端架构/后台管理架构 + 系统总架构
       # scope frontmatter(可选):architecture_scope 为子系统 slug 或 "overview"。
       # scope frontmatter(可选):scope_source_roots 为仓库相对路径数组,必须写单行 inline list,如 ["apps/web", "src-tauri"]。
       # scope frontmatter(可选):su-init 分层生成会写入;人工手写架构可标注以参与补缺判断。
     - path: "02_需求设计/"
       doc_type: requirement
+      template: _模板_需求.md
     - path: "03_开发计划/"
       doc_types: [technical_design, dev_task]
+      templates: [_模板_技术设计.md, _模板_开发任务.md]
     - path: "04_模块规格/"
       doc_type: module_spec
+      template: _模板_模块规格.md
       split_by_part: true             # 全栈大模块 → 前端-X / 后端-X / 后台管理-X
       naming: "<部分>-<模块>模块规格.md"
     - path: "05_经验沉淀/"
       doc_type: lessons
+      template: _模板_经验沉淀.md
     - path: "06_决策记录/"
       doc_type: adr
+      template: _模板_ADR.md
       naming: "ADR-NNNN-<slug>.md"
     - path: "99_归档/"
       doc_type: archive_index

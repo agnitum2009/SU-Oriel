@@ -1051,19 +1051,55 @@ interface RequirementMarkdownInput {
   fidelityDiff: string | null;
 }
 
-const REQUIREMENT_BODY_TEMPLATE_HEADINGS = [
-  "二、背景与目标",
-  "三、讨论与决策",
-  "四、功能 / 范围",
-  "五、业务规则",
-  "六、边界 / 不做项",
-  "七、开放问题 / 假设",
-  "八、拆分预览",
-  "九、数据(草案)",
-  "十、接口(草案)",
-  "十一、界面 / 页面布局",
-  "十二、交互 / 流程",
-  "十三、风险"
+const REQUIREMENT_BODY_TEMPLATE_SECTIONS = [
+  {
+    heading: "二、背景与目标",
+    guidance: "> 📌 目标对齐：用白话讲清要解决什么、给谁、为什么现在做；复杂需求补模拟示例或写无需示例原因。"
+  },
+  {
+    heading: "三、讨论与决策",
+    guidance: "> 📌 有取舍才写：记录定了什么、为什么这么定、否决了什么。"
+  },
+  {
+    heading: "四、功能 / 范围",
+    guidance: "> 📌 列清本次要做什么、谁用、怎么触发、做到什么样。"
+  },
+  {
+    heading: "五、业务规则",
+    guidance: "> 📌 把必须遵守的业务约束逐条编号，便于实现和验收引用。"
+  },
+  {
+    heading: "六、边界 / 不做项",
+    guidance: "> 📌 明确这次不做什么，避免后续实现越界扩散。"
+  },
+  {
+    heading: "七、开放问题 / 假设",
+    guidance: "> 📌 只留下尚未确认的问题和当前依赖的前提，定了就移出本节。"
+  },
+  {
+    heading: "八、拆分预览",
+    guidance: "> 📌 粗列后续可能切成哪些工作块，给任务拆分一个起点。"
+  },
+  {
+    heading: "九、数据(草案)",
+    guidance: "> 📌 涉及存储时列核心实体、关键字段、状态或枚举；不涉及可留空。"
+  },
+  {
+    heading: "十、接口(草案)",
+    guidance: "> 📌 涉及接口时列端点、方法、作用和认证；详细契约留到技术设计。"
+  },
+  {
+    heading: "十一、界面 / 页面布局",
+    guidance: "> 📌 UI 类需求用 ASCII 草图或表格说明入口、区块和关键状态。"
+  },
+  {
+    heading: "十二、交互 / 流程",
+    guidance: "> 📌 多步流程用 ASCII 流程图走一遍，说明触发、校验、处理和反馈。"
+  },
+  {
+    heading: "十三、风险",
+    guidance: "> 📌 列出会影响交付、体验或数据安全的风险，以及对应处理方式。"
+  }
 ];
 
 function renderMarkdownSection(heading: string, content: string | null | undefined): string {
@@ -1089,7 +1125,7 @@ export function renderRequirementMarkdown(input: RequirementMarkdownInput): stri
   sections.push("> ⚠️ Requirement status canonical 在本 md，Console 仅投影展示。");
   sections.push(renderMarkdownSection("需求描述", input.description.trim() || "（待补充）"));
   sections.push(renderMarkdownSection("原话（verbatim）", input.verbatimSource.trim() || input.description.trim()));
-  sections.push(...REQUIREMENT_BODY_TEMPLATE_HEADINGS.map((heading) => renderMarkdownSection(heading, null)));
+  sections.push(...REQUIREMENT_BODY_TEMPLATE_SECTIONS.map((section) => renderMarkdownSection(section.heading, section.guidance)));
   sections.push(renderMarkdownSection("Claude 解读", input.claudeInterpretation));
   sections.push(renderMarkdownSection("歧义点", input.ambiguities));
   sections.push(renderMarkdownSection("保真差异", input.fidelityDiff));

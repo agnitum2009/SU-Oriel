@@ -279,6 +279,63 @@ test("reindexRequirementScope covers requirement md, design doc, breakdown draft
   assert.ok(task.primaryDocumentId);
 });
 
+test("reindexRequirementScope ignores template docs with placeholder requirement ids", async () => {
+  const { project, localPath } = await createProjectFixture();
+  await createRequirement(project.id, "req-template-target");
+  await writeRequirementDoc(localPath, "req-template-target", "Template Target Requirement");
+  const planDir = join(localPath, "docs", "03_开发计划");
+  await mkdir(planDir, { recursive: true });
+  await writeFile(
+    join(planDir, "_模板_技术设计.md"),
+    [
+      "---",
+      "doc_type: technical_design",
+      "requirement_id: <由系统生成>",
+      "title: Template Design",
+      "---",
+      "",
+      "## 一、设计概述",
+      "",
+      "模板内容。"
+    ].join("\n"),
+    "utf8"
+  );
+  await writeFile(
+    join(planDir, "_模板_开发任务.md"),
+    [
+      "---",
+      "doc_type: dev_task",
+      "task_id: <由系统生成>",
+      "title: Template Task",
+      "status: reviewing",
+      "current_node: dispatch",
+      "node_substate: awaiting_codex_pickup",
+      "priority: medium",
+      "requirement_id: <由系统生成>",
+      "section_id: template",
+      "order: 1",
+      "implementation_owner: ccb_codex",
+      "dependencies: []",
+      "source_breakdown_draft: docs/.ccb/drafts/breakdown/<requirement_id>.json",
+      `source_draft_hash: ${"a".repeat(64)}`,
+      "created_at: 2026-05-22T10:00:00.000Z",
+      "---",
+      "",
+      "## 一、任务概述",
+      "",
+      "模板内容。"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const result = await reindexRequirementScope(prisma, project.id, "req-template-target", { debounceMs: 0 });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.designDocs.length, 0);
+  assert.equal(result.devTasks.documentCount, 0);
+  assert.equal(await prisma.document.count({ where: { projectId: project.id, path: { contains: "_模板_" } } }), 0);
+});
+
 test("reindexRequirementScope dedupes concurrent requests and reports stale task orphans without deleting them", async () => {
   const { project, localPath } = await createProjectFixture();
   await createRequirement(project.id, "req-scope-2");
