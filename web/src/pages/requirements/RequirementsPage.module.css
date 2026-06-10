@@ -83,6 +83,14 @@
   display: grid;
   align-content: start;
   gap: 10px;
+  /* 列内容区限高 + 列内滚动：列越堆越长时只滚列、不把整页顶飞。
+     沿用 DocumentsPage .navPane/.navGroups 的 calc(100vh - 固定量) idiom；
+     220px ≈ app header + 看板提示行 + 列头 + 页边距。窄屏在文件末尾 media query 解除。 */
+  min-height: 0;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .emptyColumn {
@@ -169,4 +177,12 @@
   font-size: var(--text-xs);
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* 窄屏（与 DocumentsPage 同断点）：解除列限高，回归整页滚动；列内滚动只保留在桌面。 */
+@media (max-width: 900px) {
+  .columnBody {
+    max-height: none;
+    overflow-y: visible;
+  }
 }

@@ -9,7 +9,7 @@ import { SkeletonStat } from "../../components/ui/Skeleton.js";
 import { formatDayTime } from "../../lib/format.js";
 import { createTaskBoardProjection, isTaskAttentionNeeded } from "../../lib/node-board-config.js";
 import { useProjectPathBuilder } from "../../lib/project-paths.js";
-import { classifyRequirementTab } from "../../lib/ui-mapping.js";
+import { classifyRequirementTab, isActiveRequirementTab } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 
@@ -36,8 +36,8 @@ export function OverviewPage() {
       if (tab === "delivered") {
         delivered += 1;
       }
-      // 活跃 = 仍在推进中的需求（待处理 + 推进中）；需关注是其中的子集。
-      if (tab === "pending" || tab === "inProgress") {
+      // 活跃 = 仍在生命周期早中段的需求（待处理 + 规划中 + 推进中）；需关注是其中的子集。
+      if (isActiveRequirementTab(tab)) {
         active += 1;
         const runtimeState = requirement.planningRuntimeState;
         const analysisStale = Boolean(requirement.analysisStaleAt);
@@ -97,7 +97,7 @@ export function OverviewPage() {
           </button>
         </div>
         <div className={styles.primaryStatsGrid}>
-          <MetricCard label="活跃需求" size="lg" subStatus="待处理 + 推进中" tone="default" value={requirementStats.active} />
+          <MetricCard label="活跃需求" size="lg" subStatus="待处理 + 规划中 + 推进中" tone="default" value={requirementStats.active} />
           <MetricCard
             label="需关注"
             size="lg"

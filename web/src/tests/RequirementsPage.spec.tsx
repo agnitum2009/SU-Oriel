@@ -82,11 +82,12 @@ describe("RequirementsPage 看板", () => {
     useProjectStore.setState({ requirements: [], selectedProjectId: null });
   });
 
-  it("渲染 4 个生命周期列，所有需求同时可见（不再需要切 tab）", () => {
+  it("渲染 5 个生命周期列，所有需求同时可见（不再需要切 tab）", () => {
     const { container } = renderPage();
 
     expect(column(container, "pending")).toBeTruthy();
-    expect(column(container, "inProgress")).toBeTruthy();
+    expect(column(container, "planning")).toBeTruthy();
+    expect(column(container, "delivering")).toBeTruthy();
     expect(column(container, "delivered")).toBeTruthy();
     expect(column(container, "archived")).toBeTruthy();
 
@@ -100,16 +101,17 @@ describe("RequirementsPage 看板", () => {
     expect(screen.getByText("未知 status 需求")).toBeTruthy();
   });
 
-  it("卡片按 classifyRequirementTab 归桶：待处理1 / 推进中3 / 已交付1 / 已归档2", () => {
+  it("卡片按 classifyRequirementTab 归桶：待处理1 / 规划中1 / 推进中2 / 已交付1 / 已搁置2", () => {
     const { container } = renderPage();
 
     expect(within(column(container, "pending")).getAllByRole("link")).toHaveLength(1);
-    expect(within(column(container, "inProgress")).getAllByRole("link")).toHaveLength(3);
+    expect(within(column(container, "planning")).getAllByRole("link")).toHaveLength(1);
+    expect(within(column(container, "delivering")).getAllByRole("link")).toHaveLength(2);
     expect(within(column(container, "delivered")).getAllByRole("link")).toHaveLength(1);
     expect(within(column(container, "archived")).getAllByRole("link")).toHaveLength(2);
   });
 
-  it("cancelled 与未知 status 落到已归档列，不丢失", () => {
+  it("cancelled 与未知 status 落到已搁置列，不丢失", () => {
     const { container } = renderPage();
     const archived = column(container, "archived");
 
@@ -121,8 +123,8 @@ describe("RequirementsPage 看板", () => {
     const { container } = renderPage();
 
     expect(within(column(container, "pending")).getByText(/开始分析/)).toBeTruthy();
-    expect(within(column(container, "inProgress")).getByText(/继续设计/)).toBeTruthy();
-    expect(within(column(container, "inProgress")).getAllByText(/查看子任务/)).toHaveLength(2);
+    expect(within(column(container, "planning")).getByText(/继续设计/)).toBeTruthy();
+    expect(within(column(container, "delivering")).getAllByText(/查看子任务/)).toHaveLength(2);
 
     // cancelled/deferred（getRequirementAction kind=archived）无前进操作文案；
     // 未知 status 仍兜底为“查看详情”，所以断言收敛到 cancelled 卡片本身。
@@ -138,9 +140,30 @@ describe("RequirementsPage 看板", () => {
     const { container } = renderPage();
 
     expect(within(column(container, "pending")).getByText("唯一草稿")).toBeTruthy();
-    expect(within(column(container, "inProgress")).getByText("暂无需求")).toBeTruthy();
+    expect(within(column(container, "planning")).getByText("暂无需求")).toBeTruthy();
+    expect(within(column(container, "delivering")).getByText("暂无需求")).toBeTruthy();
     expect(within(column(container, "delivered")).getByText("暂无需求")).toBeTruthy();
     expect(within(column(container, "archived")).getByText("暂无需求")).toBeTruthy();
+  });
+
+  it("已搁置列改名生效、视觉降权 muted，且每列都有滚动内容区", () => {
+    const { container } = renderPage();
+
+    // 改名：archived 列标题为「已搁置」，不再出现旧词「已归档」
+    const archived = column(container, "archived");
+    expect(within(archived).getByText("已搁置")).toBeTruthy();
+    expect(within(archived).queryByText("已归档")).toBeNull();
+
+    // muted：archived 列 data-archived=true（走 column.muted，不绑 key 字符串），其余列无该标记
+    expect(archived.getAttribute("data-archived")).toBe("true");
+    for (const key of ["pending", "planning", "delivering", "delivered"]) {
+      expect(column(container, key).getAttribute("data-archived")).toBeNull();
+    }
+
+    // 列内滚动容器存在：真实滚动 happy-dom 测不到，仅断言每列 .columnBody 结构在位（行为见浏览器/视觉验证）
+    for (const key of ["pending", "planning", "delivering", "delivered", "archived"]) {
+      expect(column(container, key).querySelector('[class*="columnBody"]')).toBeTruthy();
+    }
   });
 });
 

@@ -261,18 +261,20 @@ export function getRequirementStatusBadge(status: string): { label: string; colo
   }
 }
 
-export type RequirementTabKey = "pending" | "inProgress" | "delivered" | "archived";
+export type RequirementTabKey = "pending" | "planning" | "delivering" | "delivered" | "archived";
 
 export const REQUIREMENT_TAB_LABELS: Record<RequirementTabKey, string> = {
   pending: "待处理",
-  inProgress: "推进中",
+  planning: "规划中",
+  delivering: "推进中",
   delivered: "已交付",
-  archived: "已归档"
+  archived: "已搁置"
 };
 
 /**
- * 把需求 status 归类到列表页 4 个 tab。
+ * 把需求 status 归类到列表页 5 个生命周期 tab。
  *
+ * planning / delivering 各自独立成桶（看板列对应 5 列）；
  * 未知 status 兜底到 archived，避免数据从 UI 消失。
  */
 export function classifyRequirementTab(status: string): RequirementTabKey {
@@ -280,8 +282,9 @@ export function classifyRequirementTab(status: string): RequirementTabKey {
     case "drafting":
       return "pending";
     case "planning":
+      return "planning";
     case "delivering":
-      return "inProgress";
+      return "delivering";
     case "delivered":
       return "delivered";
     case "deferred":
@@ -290,6 +293,16 @@ export function classifyRequirementTab(status: string): RequirementTabKey {
     default:
       return "archived";
   }
+}
+
+/**
+ * 需求是否处于「活跃」生命周期（待处理 / 规划中 / 推进中）。
+ *
+ * 首页「活跃需求」聚合口径的单一真相源：delivered / archived 不算活跃。
+ * 抽成谓词，避免调用方内联枚举 tab 时漏掉 planning（规划中需求被静默漏算）。
+ */
+export function isActiveRequirementTab(tab: RequirementTabKey): boolean {
+  return tab === "pending" || tab === "planning" || tab === "delivering";
 }
 
 export interface RequirementAction {
@@ -318,7 +331,7 @@ export function getRequirementAction(status: string, generatedTaskId: string | n
     return { kind: "open-detail", label: "查看详情" };
   }
   if (status === "deferred" || status === "cancelled") {
-    return { kind: "archived", label: "已归档", disabled: true };
+    return { kind: "archived", label: "已搁置", disabled: true };
   }
   return { kind: "open-detail", label: "查看详情" };
 }

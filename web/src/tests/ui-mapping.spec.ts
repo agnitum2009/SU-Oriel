@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyRequirementTab,
   getRequirementAction,
-  getRequirementStatusBadge
+  getRequirementStatusBadge,
+  isActiveRequirementTab
 } from "../lib/ui-mapping.js";
 
 describe("getRequirementStatusBadge", () => {
@@ -52,8 +53,8 @@ describe("getRequirementStatusBadge", () => {
 describe("classifyRequirementTab", () => {
   it.each([
     ["drafting", "pending"],
-    ["planning", "inProgress"],
-    ["delivering", "inProgress"],
+    ["planning", "planning"],
+    ["delivering", "delivering"],
     ["delivered", "delivered"],
     ["deferred", "archived"],
     ["cancelled", "archived"]
@@ -65,6 +66,18 @@ describe("classifyRequirementTab", () => {
     expect(classifyRequirementTab("legacy_unknown")).toBe("archived");
     expect(classifyRequirementTab("converted")).toBe("archived"); // 老数据未被 migration 命中时的兜底
     expect(classifyRequirementTab("")).toBe("archived");
+  });
+});
+
+describe("isActiveRequirementTab", () => {
+  it.each([
+    ["pending", true],
+    ["planning", true],
+    ["delivering", true],
+    ["delivered", false],
+    ["archived", false]
+  ] as const)("tab=%s → 活跃=%s（首页活跃口径含 planning）", (tab, expected) => {
+    expect(isActiveRequirementTab(tab)).toBe(expected);
   });
 });
 
@@ -89,11 +102,11 @@ describe("getRequirementAction", () => {
   );
 
   it.each(["deferred", "cancelled"] as const)(
-    "status=%s → 已归档（disabled）",
+    "status=%s → 已搁置（disabled）",
     (status) => {
       const action = getRequirementAction(status, "task-id-anything");
       expect(action.kind).toBe("archived");
-      expect(action.label).toBe("已归档");
+      expect(action.label).toBe("已搁置");
       expect(action.disabled).toBe(true);
     }
   );

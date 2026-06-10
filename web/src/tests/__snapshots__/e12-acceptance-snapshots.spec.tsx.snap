@@ -641,7 +641,7 @@ exports[`E12 acceptance DOM baselines > captures overview page baseline 1`] = `
           <p
             class="_subStatus_fae239"
           >
-            待处理 + 推进中
+            待处理 + 规划中 + 推进中
           </p>
         </div>
         <div
@@ -1286,7 +1286,7 @@ exports[`E12 acceptance DOM baselines > captures requirements page baseline 1`] 
       </section>
       <section
         class="_column_e4fcb9"
-        data-column="inProgress"
+        data-column="planning"
       >
         <div
           class="_columnHeader_e4fcb9"
@@ -1294,7 +1294,7 @@ exports[`E12 acceptance DOM baselines > captures requirements page baseline 1`] 
           <span
             class="_columnTitle_e4fcb9"
           >
-            推进中
+            规划中
           </span>
           <span
             class="_badge_fa5bc6 _gray_fa5bc6"
@@ -1363,6 +1363,34 @@ exports[`E12 acceptance DOM baselines > captures requirements page baseline 1`] 
       </section>
       <section
         class="_column_e4fcb9"
+        data-column="delivering"
+      >
+        <div
+          class="_columnHeader_e4fcb9"
+        >
+          <span
+            class="_columnTitle_e4fcb9"
+          >
+            推进中
+          </span>
+          <span
+            class="_badge_fa5bc6 _gray_fa5bc6"
+          >
+            0
+          </span>
+        </div>
+        <div
+          class="_columnBody_e4fcb9"
+        >
+          <div
+            class="_emptyColumn_e4fcb9"
+          >
+            暂无需求
+          </div>
+        </div>
+      </section>
+      <section
+        class="_column_e4fcb9"
         data-column="delivered"
       >
         <div
@@ -1400,7 +1428,7 @@ exports[`E12 acceptance DOM baselines > captures requirements page baseline 1`] 
           <span
             class="_columnTitle_e4fcb9"
           >
-            已归档
+            已搁置
           </span>
           <span
             class="_badge_fa5bc6 _gray_fa5bc6"
