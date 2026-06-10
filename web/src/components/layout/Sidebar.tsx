@@ -4,6 +4,7 @@ import { NavLink } from "react-router";
 import { fetchVersion, type SuOrielVersion } from "../../lib/console-api.js";
 import { getTaskAttentionSummary } from "../../lib/node-board-config.js";
 import { projectPath } from "../../lib/project-paths.js";
+import { useProjectOnboardingGate } from "../../lib/use-project-onboarding-gate.js";
 import { useProjectStore } from "../../stores/project-store.js";
 import type { ProjectView } from "../../types/project.js";
 import { useUIStore } from "../../stores/ui-store.js";
@@ -31,6 +32,8 @@ interface NavItem {
 interface NavSection {
   label: string;
   items: NavItem[];
+  // 该组业务页需项目初始化(ccb runtime + 知识库)就绪后才可进入;未就绪时锁定并弹引导。
+  gated?: boolean;
 }
 
 const navSections: NavSection[] = [
@@ -43,6 +46,7 @@ const navSections: NavSection[] = [
   },
   {
     label: "项目",
+    gated: true,
     items: [
       { to: "/requirements", label: "需求管理", icon: "◇" },
       { to: "/tasks", label: "任务看板", icon: "☰", hidden: true },
@@ -70,6 +74,8 @@ export function Sidebar(props: SidebarProps) {
   const [versionInfo, setVersionInfo] = useState<SuOrielVersion | null>(null);
   const selectedProject = props.projects.find((project) => project.id === props.selectedProjectId) ?? null;
   const taskAttention = useMemo(() => getTaskAttentionSummary(tasks), [tasks]);
+  // 项目接入门控:未就绪时锁定"项目"组导航项,点击弹引导而非跳转。
+  const onboardingGate = useProjectOnboardingGate(props.selectedProjectId);
   const displayVersion = versionInfo
     ? `su-oriel v${versionInfo.version} · ${versionInfo.gitSha || "unknown"}`
     : "su-oriel v0.1.0 · unknown";
@@ -165,6 +171,26 @@ export function Sidebar(props: SidebarProps) {
               <div aria-hidden="true" className={styles.navSectionDivider} />
             )}
             {visibleItems.map((item) => {
+              // 门控组未就绪:渲染锁定 button(非 disabled、可聚焦、点击弹引导、不导航、不模拟 active)。
+              const locked = section.gated === true && props.selectedProjectId !== null && !onboardingGate.ready;
+              if (locked) {
+                return (
+                  <button
+                    aria-disabled="true"
+                    className={styles.navItem}
+                    key={item.to}
+                    onClick={() => onboardingGate.requireInit()}
+                    style={{ opacity: 0.55, cursor: "pointer" }}
+                    title={onboardingGate.loading ? "正在检测项目接入状态…" : "需先完成项目初始化(CCB 运行时 + 知识库)"}
+                    type="button"
+                  >
+                    <span aria-hidden="true" className={styles.navIcon}>
+                      {onboardingGate.loading ? "…" : "🔒"}
+                    </span>
+                    {!sidebarCollapsed ? <span className={styles.navLabel}>{item.label}</span> : null}
+                  </button>
+                );
+              }
               const showTaskBadge = item.to === "/tasks" && taskAttention.total > 0;
               const to = props.selectedProjectId ? projectPath(props.selectedProjectId, item.to) : "/";
               return (

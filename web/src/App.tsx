@@ -19,6 +19,7 @@ import { NotificationBell } from "./components/notifications/NotificationBell.js
 import { NotificationManager } from "./components/notifications/NotificationManager.js";
 import { PageHeader } from "./components/layout/PageHeader.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
+import { OnboardingRequiredModal } from "./components/projects/OnboardingRequiredModal.js";
 import { ProjectScanProgressBar } from "./components/projects/ProjectScanProgressBar.js";
 import { RequirementMarkdownEditor } from "./components/requirements/RequirementMarkdownEditor.js";
 import { Button } from "./components/ui/Button.js";
@@ -684,6 +685,8 @@ function ConsoleLayout() {
           </label>
         </div>
       </Modal>
+
+      <OnboardingRequiredModal />
 
       <Modal
         footer={
