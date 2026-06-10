@@ -1064,12 +1064,75 @@ describe("RequirementDetailPage 极简详情页", () => {
     expect(within(menu).getByRole("menuitem", { name: "恢复运行时" })).not.toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "暂缓" })).toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "复活" })).toBeDisabled();
-    expect(within(menu).getByRole("menuitem", { name: "归档" })).not.toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "归档" })).toBeDisabled();
+    expect(within(menu).getByRole("menuitem", { name: "归档" })).toHaveAttribute(
+      "title",
+      "仅 delivering（推进中）状态可归档"
+    );
     expect(within(menu).getByRole("menuitem", { name: "取消" })).toBeDisabled();
     expect(within(menu).getByRole("menuitem", { name: "暂缓" })).toHaveAttribute(
       "title",
       "仅 drafting / planning / delivering 状态可暂缓"
     );
+  });
+
+  it("enables archive only while delivering", async () => {
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(
+      buildRequirement({ status: "delivering", planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "需求生命周期操作" })).getByRole("menuitem", { name: "归档" }));
+
+    expect(await screen.findByRole("dialog", { name: "确认归档需求" })).toBeInTheDocument();
+  });
+
+  it.each(["planning", "cancelled", "deferred", "delivered"] as const)(
+    "disables archive while requirement is %s",
+    async (status) => {
+      vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(
+        buildRequirement({ status, planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
+      );
+
+      renderPage();
+
+      fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+
+      const archiveAction = within(screen.getByRole("menu", { name: "需求生命周期操作" })).getByRole("menuitem", {
+        name: "归档"
+      });
+      expect(archiveAction).toBeDisabled();
+      expect(archiveAction).toHaveAttribute("title", "仅 delivering（推进中）状态可归档");
+    }
+  );
+
+  it("shows the archive confirmation hint only for archive", async () => {
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(
+      buildRequirement({ status: "delivering", planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
+    );
+
+    const { unmount } = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "需求生命周期操作" })).getByRole("menuitem", { name: "归档" }));
+
+    const archiveDialog = await screen.findByRole("dialog", { name: "确认归档需求" });
+    expect(within(archiveDialog).getByText("请确认子任务已全部完成并合并后再归档")).toBeInTheDocument();
+
+    unmount();
+    vi.mocked(consoleApi.fetchRequirementDetail).mockResolvedValue(
+      buildRequirement({ status: "planning", planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
+    );
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "更多操作" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "需求生命周期操作" })).getByRole("menuitem", { name: "取消" }));
+
+    const cancelDialog = await screen.findByRole("dialog", { name: "确认取消需求" });
+    expect(within(cancelDialog).queryByText("请确认子任务已全部完成并合并后再归档")).toBeNull();
   });
 
   it.each([
@@ -1093,7 +1156,7 @@ describe("RequirementDetailPage 极简详情页", () => {
       command: "su-archive",
       dialog: "确认归档需求",
       confirm: "确认归档",
-      requirement: buildRequirement({ status: "delivered", planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
+      requirement: buildRequirement({ status: "delivering", planningRuntimeState: "running", planningAnchorId: "anchor-req-1" })
     },
     {
       label: "取消",

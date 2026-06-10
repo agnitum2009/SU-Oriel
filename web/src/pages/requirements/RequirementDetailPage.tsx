@@ -257,7 +257,7 @@ function renderTaskMarkdownContent(state: MarkdownReaderState): ReactNode {
 function lifecycleDisabledReason(action: LifecycleAction, requirement: RequirementDetailView): string | null {
   switch (action.command) {
     case "su-archive":
-      return requirement.status === "delivered" ? null : "仅 delivered 状态可归档";
+      return requirement.status === "delivering" ? null : "仅 delivering（推进中）状态可归档";
     case "su-defer":
       return DEFERABLE_REQUIREMENT_STATUSES.has(requirement.status)
         ? null
@@ -1461,9 +1461,14 @@ export function RequirementDetailPage() {
               </label>
             </div>
           ) : (
-            <p className={styles.confirmText}>
-              你将{confirmLifecycleText.verb}需求「{requirement.title}」，此动作通过 slot dispatch 派发到 Claude，是否继续？
-            </p>
+            <>
+              <p className={styles.confirmText}>
+                你将{confirmLifecycleText.verb}需求「{requirement.title}」，此动作通过 slot dispatch 派发到 Claude，是否继续？
+              </p>
+              {confirmLifecycleAction.command === "su-archive" ? (
+                <p className={styles.confirmText}>请确认子任务已全部完成并合并后再归档</p>
+              ) : null}
+            </>
           )
         ) : null}
       </Modal>
