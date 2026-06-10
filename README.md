@@ -4,6 +4,26 @@
 
 SU-Oriel 不是一个独立工具，它是 [**SU-CCB**](https://github.com/Im-Sue/SU-CCB) 这套 AI 工程协作框架的一部分。要看懂它，先得知道它在管什么、为什么这么管。
 
+<a id="quick-eval"></a>
+
+## 评估者 5 分钟看控制台
+
+只想先看 SU-Oriel 控制台，不需要 clone SU-CCB 根仓。直接 clone 本仓、安装依赖、启动后端和前端：
+
+```bash
+git clone https://github.com/Im-Sue/SU-Oriel.git && cd SU-Oriel
+pnpm install
+pnpm build
+
+# 终端 1：后端，首次会准备本地 SQLite DB
+./scripts/dev-server.sh
+
+# 终端 2：前端
+./scripts/dev-web.sh
+```
+
+前端启动后按终端输出的 Vite 地址打开页面，登记一个本地项目路径即可查看项目、文档和任务投影。要从控制台投递 `/ccb:su-init`、打开 slot 终端或跑真实 agent，再按下面的「快速开始」补齐 plugin / skills / bridge。
+
 ---
 
 ## 一、先理解它属于什么：从 Vibe Coding 到 Vibe Engineering
@@ -114,29 +134,50 @@ pnpm workspace（`web` + `server`），包名 `su-oriel-web` / `su-oriel-server`
 ## 快速开始
 
 > **环境**：仅支持 **WSL 与 macOS**（`node-pty` 等原生模块依赖 Unix；Windows 请在 WSL 内运行）。
->
-> **前置必装**：先装底层运行时 [claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge)（提供 `ccb` / `ccbd`，slot 终端等能力依赖它）——
-> ```bash
-> # 从 Releases 下载 ccb-*.tar.gz 后
-> tar -xzf ccb-*.tar.gz && cd ccb-* && ./install.sh install
-> # 或源码：git clone https://github.com/SeemSeam/claude_codex_bridge.git && cd claude_codex_bridge && ./install.sh install
-> ```
-> bridge 前置依赖：Python 3.10+、`tmux`、至少一个 agent CLI。
+
+### 1. 安装并启动 SU-Oriel
+
+控制台用户只需要 clone 本仓，不需要 clone SU-CCB 根仓：
 
 ```bash
+git clone https://github.com/Im-Sue/SU-Oriel.git && cd SU-Oriel
 pnpm install
-pnpm --filter su-oriel-server db:prepare   # 首次：准备本地 SQLite DB
-pnpm dev:server                            # 启动后端（一个终端）
-pnpm dev:web                               # 启动前端（另一个终端）
-
-# 构建 / 测试
 pnpm build
-pnpm test
 ```
 
-启动后在控制台里登记你的项目（填本地路径），即可开始观测。
+启动后端和前端需要两个 shell：
 
-> 也可以用 `scripts/` 下的一键脚本（自动 db 准备 + 构建 + 启动）：bash 用 `./scripts/dev-server.sh`、`./scripts/dev-web.sh`；Windows 用同名 `.ps1`。
+```bash
+# shell 1：后端，首次会准备本地 SQLite DB
+./scripts/dev-server.sh
+```
+
+```bash
+# shell 2：前端
+./scripts/dev-web.sh
+```
+
+### 2. 安装 plugin / skills
+
+先按 [su-ccb-claude-plugin 安装说明](https://github.com/Im-Sue/su-ccb-claude-plugin#install) 完成系统级 Claude plugin 安装，并按 [su-ccb-codex-skills 安装说明](https://github.com/Im-Sue/su-ccb-codex-skills#install) 完成用户级 Codex skills 安装；两者都要先装好，再启动 CCB，这样 CCB 派生的 Claude / Codex agent 才会继承 plugin 与 skills。
+
+### 3. 安装底层 bridge
+
+安装 [claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge#readme)（提供 `ccb` / `ccbd`、slot 终端和 project ccbd），按其 README 执行 `./install.sh install`。bridge 前置依赖包括 Python 3.10+、`tmux`、Claude / Codex CLI。
+
+### 4. 接入每一个项目
+
+在 SU-Oriel 控制台登记本地项目路径后，页面顶部会出现 `ProjectOnboardingBanner`：
+
+- 可以点击一键投递，让主项目 `ccbd` 执行 `/ccb:su-init`。
+- 也可以复制命令，在该项目终端里手动运行 `/ccb:su-init`。
+- ready 判定以项目根下 `.ccb/ccb.config` 与 `docs/.ccb/docs-structure-contract.yaml` 同时存在为准。
+
+### 5. 收尾与关闭
+
+- 停 CCB/agent/tmux 运行时：先执行 `ccb kill`；仍有残留时执行 `ccb kill -f`。
+- 停 SU-Oriel 后端和前端：回到运行 `./scripts/dev-server.sh`、`./scripts/dev-web.sh` 的终端，按 `Ctrl-C`，或直接关闭对应终端。
+- 后台 project ccbd 是**有意常驻**：关闭控制台页面或停止 SU-Oriel dev server/web 后，已投递的后台 agent 长任务不会被打断。这不是 bug；需要彻底收尾时再用 `ccb kill` / `ccb kill -f`。
 
 ## Troubleshooting
 
