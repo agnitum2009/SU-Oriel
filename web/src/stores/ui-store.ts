@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import type { AttentionItem } from "../lib/console-api.js";
+
 const SIDEBAR_COLLAPSED_KEY = "ccb-console:sidebar-collapsed";
 const NOTIFICATION_SETTINGS_KEY = "ccb-console:notification-settings";
 
@@ -54,6 +56,15 @@ interface ToastItem {
   message: string;
 }
 
+export interface AttentionSnapshot {
+  projectId: string;
+  items: AttentionItem[];
+  count: number;
+  dndActive: boolean;
+  dndUntil: string | null;
+  fetchedAt: string;
+}
+
 interface UIStore {
   sidebarCollapsed: boolean;
   slidePanelOpen: boolean;
@@ -65,7 +76,7 @@ interface UIStore {
   toasts: ToastItem[];
   anchorResetEpochs: Record<string, number>;
   notificationSettings: NotificationSettings;
-  attentionUnreadCount: number;
+  attentionSnapshot: AttentionSnapshot | null;
   toggleSidebar: () => void;
   openTaskPanel: (taskId: string) => void;
   closeSlidePanel: () => void;
@@ -77,7 +88,9 @@ interface UIStore {
   removeToast: (id: string) => void;
   bumpAnchorResetEpoch: (taskId: string) => void;
   updateNotificationSettings: (patch: Partial<NotificationSettings>) => void;
-  setAttentionUnreadCount: (count: number) => void;
+  setAttentionSnapshot: (snapshot: AttentionSnapshot) => void;
+  clearAttentionSnapshot: () => void;
+  removeAttentionRefs: (refs: string[]) => void;
 }
 
 export const useUIStore = create<UIStore>()((set) => ({
@@ -90,7 +103,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   toasts: [],
   anchorResetEpochs: {},
   notificationSettings: loadNotificationSettings(),
-  attentionUnreadCount: 0,
+  attentionSnapshot: null,
   toggleSidebar: () => {
     set((state) => {
       const next = !state.sidebarCollapsed;
@@ -154,7 +167,35 @@ export const useUIStore = create<UIStore>()((set) => ({
       return { notificationSettings: next };
     });
   },
-  setAttentionUnreadCount: (count) => {
-    set({ attentionUnreadCount: Math.max(0, count) });
+  setAttentionSnapshot: (snapshot) => {
+    set({
+      attentionSnapshot: {
+        ...snapshot,
+        count: Math.max(0, snapshot.count)
+      }
+    });
+  },
+  clearAttentionSnapshot: () => {
+    set({ attentionSnapshot: null });
+  },
+  removeAttentionRefs: (refs) => {
+    const refSet = new Set(refs);
+    if (refSet.size === 0) {
+      return;
+    }
+    set((state) => {
+      const snapshot = state.attentionSnapshot;
+      if (!snapshot) {
+        return {};
+      }
+      const items = snapshot.items.filter((item) => !refSet.has(item.ref));
+      return {
+        attentionSnapshot: {
+          ...snapshot,
+          items,
+          count: items.length
+        }
+      };
+    });
   }
 }));

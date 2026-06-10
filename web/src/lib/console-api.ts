@@ -107,6 +107,8 @@ export interface AttentionListResponse {
   project_id: string;
   items: AttentionItem[];
   count: number;
+  dnd_active: boolean;
+  dnd_until: string | null;
 }
 
 export interface AttentionAckResponse {

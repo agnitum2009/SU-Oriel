@@ -6,11 +6,12 @@ import {
   fetchAttention,
   type AttentionItem
 } from "../../lib/console-api.js";
+import { buildAttentionNavigatePath } from "../../lib/attention-navigation.js";
 import {
+  playAttentionSound,
   setAttentionBadge,
   showBrowserNotification
 } from "../../lib/browser-notify.js";
-import { projectPath } from "../../lib/project-paths.js";
 import { useUIStore } from "../../stores/ui-store.js";
 
 const DEFAULT_POLL_MS = 7_000;
@@ -41,7 +42,8 @@ interface LeaderRecord {
 export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: NotificationManagerProps) {
   const navigate = useNavigate();
   const notificationSettings = useUIStore((state) => state.notificationSettings);
-  const setAttentionUnreadCount = useUIStore((state) => state.setAttentionUnreadCount);
+  const setAttentionSnapshot = useUIStore((state) => state.setAttentionSnapshot);
+  const clearAttentionSnapshot = useUIStore((state) => state.clearAttentionSnapshot);
   const addToast = useUIStore((state) => state.addToast);
 
   const settingsRef = useRef(notificationSettings);
@@ -71,10 +73,10 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
     pendingAckRefsRef.current = new Set();
     reportedAckFailuresRef.current = new Set();
     permissionDeniedToastShownRef.current = false;
+    clearAttentionSnapshot();
+    setAttentionBadge(0);
 
     if (!projectId) {
-      setAttentionUnreadCount(0);
-      setAttentionBadge(0);
       return;
     }
 
@@ -130,7 +132,14 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
         }
 
         const currentRefs = new Set(response.items.map((item) => item.ref));
-        setAttentionUnreadCount(response.count);
+        setAttentionSnapshot({
+          projectId: response.project_id,
+          items: response.items,
+          count: response.count,
+          dndActive: response.dnd_active,
+          dndUntil: response.dnd_until,
+          fetchedAt: new Date().toISOString()
+        });
         setAttentionBadge(response.count);
         await retryPendingAcks(currentRefs);
 
@@ -146,6 +155,24 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
             !previousRefs.has(item.ref) &&
             !shownRefsRef.current.has(item.ref)
         );
+        if (candidates.length === 0 || response.dnd_active) {
+          return;
+        }
+
+        if (document.visibilityState === "visible") {
+          for (const item of candidates) {
+            shownRefsRef.current.add(item.ref);
+          }
+          addToastRef.current(
+            "info",
+            candidates.length === 1 ? `新通知：${candidates[0].title}` : `${candidates.length} 条新通知`
+          );
+          if (settingsRef.current.soundEnabled) {
+            playAttentionSound();
+          }
+          return;
+        }
+
         if (!settingsRef.current.browserEnabled) {
           return;
         }
@@ -184,27 +211,9 @@ export function NotificationManager({ projectId, pollMs = DEFAULT_POLL_MS }: Not
       window.clearInterval(intervalId);
       coordinator.destroy();
     };
-  }, [pollMs, projectId, setAttentionUnreadCount]);
+  }, [clearAttentionSnapshot, pollMs, projectId, setAttentionSnapshot]);
 
   return null;
-}
-
-export function buildAttentionNavigatePath(item: AttentionItem, fallbackProjectId?: string | null): string {
-  const projectId = item.projectId ?? fallbackProjectId ?? null;
-  const scoped = (path: string) => (projectId ? projectPath(projectId, path) : path);
-  if (item.cta.type === "task" && item.cta.taskId) {
-    return scoped(`/tasks/${item.cta.taskId}`);
-  }
-  if (item.cta.type === "requirement" && item.cta.requirementId) {
-    return scoped(`/requirements/${item.cta.requirementId}`);
-  }
-  if (item.taskId) {
-    return scoped(`/tasks/${item.taskId}`);
-  }
-  if (item.requirementId) {
-    return scoped(`/requirements/${item.requirementId}`);
-  }
-  return scoped("/overview");
 }
 
 export function createAttentionTabCoordinator(projectId: string): AttentionTabCoordinator {

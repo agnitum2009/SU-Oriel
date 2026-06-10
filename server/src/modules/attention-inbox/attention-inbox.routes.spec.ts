@@ -144,9 +144,12 @@ test("attention settings routes persist and clear project DND", async () => {
   assert.equal(put.statusCode, 200);
   assert.equal(put.json().dnd_until, dndUntil);
 
-  const suppressed = await app.inject({ method: "GET", url: `/api/projects/${fx.projectId}/attention` });
-  assert.equal(suppressed.statusCode, 200);
-  assert.equal(suppressed.json().count, 0);
+  const paused = await app.inject({ method: "GET", url: `/api/projects/${fx.projectId}/attention` });
+  assert.equal(paused.statusCode, 200);
+  assert.equal(paused.json().count, 1);
+  assert.equal(paused.json().items[0].ref, fx.intentRef);
+  assert.equal(paused.json().dnd_active, true);
+  assert.equal(paused.json().dnd_until, dndUntil);
 
   const cleared = await app.inject({
     method: "PUT",
@@ -159,6 +162,8 @@ test("attention settings routes persist and clear project DND", async () => {
   const visible = await app.inject({ method: "GET", url: `/api/projects/${fx.projectId}/attention` });
   assert.equal(visible.statusCode, 200);
   assert.equal(visible.json().count, 1);
+  assert.equal(visible.json().dnd_active, false);
+  assert.equal(visible.json().dnd_until, null);
 
   await app.close();
 });

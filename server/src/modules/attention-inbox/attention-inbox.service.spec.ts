@@ -233,7 +233,7 @@ test("computeAttention derives the 5 business sources in batch and keeps source-
   ]));
 });
 
-test("ack left-anti-join and DND suppress visible attention items", async () => {
+test("ack left-anti-join and DND marks delivery pause without hiding attention items", async () => {
   const fx = await fixture();
   await seedAllBusinessSources(fx);
   const service = new AttentionInboxService(prisma);
@@ -245,13 +245,19 @@ test("ack left-anti-join and DND suppress visible attention items", async () => 
   assert.equal(afterAck.items.some((item) => item.ref === targetRef), false);
   assert.equal(afterAck.count, 9);
 
-  await service.putSettings(fx.projectId, new Date("2026-06-06T13:00:00.000Z"));
+  const dndUntil = new Date("2026-06-06T13:00:00.000Z");
+  await service.putSettings(fx.projectId, dndUntil);
   const dnd = await service.computeAttention(fx.projectId, { now: NOW });
-  assert.equal(dnd.count, 0);
+  assert.equal(dnd.count, 9);
+  assert.equal(dnd.items.length, 9);
+  assert.equal(dnd.dnd_active, true);
+  assert.equal(dnd.dnd_until, dndUntil.toISOString());
 
   await service.putSettings(fx.projectId, null);
   const visibleAgain = await service.computeAttention(fx.projectId, { now: NOW });
   assert.equal(visibleAgain.count, 9);
+  assert.equal(visibleAgain.dnd_active, false);
+  assert.equal(visibleAgain.dnd_until, null);
 });
 
 test("computeAttention includes provider activity source and ack suppresses it", async () => {

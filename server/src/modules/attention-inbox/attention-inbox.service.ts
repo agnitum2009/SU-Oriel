@@ -189,14 +189,15 @@ export class AttentionInboxService implements AttentionInboxServiceLike {
 
     const unacked = items.filter((item) => !ackedRefs.has(item.ref));
     const dndActive = settings?.dndUntil ? settings.dndUntil.getTime() > now.getTime() : false;
-    const visible = dndActive ? [] : unacked;
 
-    visible.sort(compareAttentionItems);
+    unacked.sort(compareAttentionItems);
 
     return {
       project_id: projectId,
-      items: visible,
-      count: visible.length
+      items: unacked,
+      count: unacked.length,
+      dnd_active: dndActive,
+      dnd_until: settings?.dndUntil?.toISOString() ?? null
     };
   }
 

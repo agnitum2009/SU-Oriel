@@ -96,7 +96,7 @@ export function resetBrowserNotifyForTests() {
   originalFaviconHref = undefined;
 }
 
-function playAttentionSound() {
+export function playAttentionSound() {
   const maybeWebkit = globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext };
   const AudioContextCtor = globalThis.AudioContext ?? maybeWebkit.webkitAudioContext;
   if (AudioContextCtor) {

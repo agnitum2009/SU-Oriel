@@ -23,7 +23,7 @@ export function NotificationBell({ projectId }: NotificationBellProps) {
   const [saving, setSaving] = useState(false);
   const [permission, setPermission] = useState<BrowserNotificationPermission>(() => getBrowserNotificationPermission());
   const notificationSettings = useUIStore((state) => state.notificationSettings);
-  const attentionUnreadCount = useUIStore((state) => state.attentionUnreadCount);
+  const attentionSnapshot = useUIStore((state) => state.attentionSnapshot);
   const updateLocalSettings = useUIStore((state) => state.updateNotificationSettings);
   const addToast = useUIStore((state) => state.addToast);
 
@@ -95,19 +95,20 @@ export function NotificationBell({ projectId }: NotificationBellProps) {
     return null;
   }
 
-  const countLabel = attentionUnreadCount > 99 ? "99+" : String(attentionUnreadCount);
+  const unreadCount = attentionSnapshot?.projectId === projectId ? attentionSnapshot.count : 0;
+  const countLabel = unreadCount > 99 ? "99+" : String(unreadCount);
 
   return (
     <div className={styles.root}>
       <button
         aria-expanded={open}
-        aria-label={`通知设置，${attentionUnreadCount} 条未读`}
+        aria-label={`通知设置，${unreadCount} 条未读`}
         className={styles.trigger}
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
         <span>通知</span>
-        {attentionUnreadCount > 0 ? <span className={styles.badge}>{countLabel}</span> : null}
+        {unreadCount > 0 ? <span className={styles.badge}>{countLabel}</span> : null}
       </button>
 
       {open ? (

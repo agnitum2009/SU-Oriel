@@ -56,7 +56,13 @@ describe("console-api 真实联调行为", () => {
 
   it("attention client 使用项目级 list / ack / settings 端点", async () => {
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ project_id: "p1", items: [], count: 0 }), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        project_id: "p1",
+        items: [],
+        count: 0,
+        dnd_active: false,
+        dnd_until: null
+      }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
       }))
