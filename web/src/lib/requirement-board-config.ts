@@ -12,13 +12,14 @@ export interface RequirementBoardColumnDef {
 /**
  * 需求看板列定义。
  *
- * 复用列表页已有的 4 个分类桶（{@link classifyRequirementTab}）作为看板 4 列，
- * 与需求生命周期语义一致，零额外映射。这是任务看板 NODE_BOARD_COLUMNS 的对应物，
- * 但列是需求生命周期阶段而非任务工作流节点。
+ * 复用列表页已有的 5 个分类桶（{@link classifyRequirementTab}）作为看板 5 列，
+ * 按生命周期排序（待处理→规划中→推进中→已交付→已搁置），与需求 status 枚举同序、零额外映射。
+ * 这是任务看板 NODE_BOARD_COLUMNS 的对应物，但列是需求生命周期阶段而非任务工作流节点。
  */
 export const REQUIREMENT_BOARD_COLUMNS: RequirementBoardColumnDef[] = [
   { key: "pending", label: REQUIREMENT_TAB_LABELS.pending },
-  { key: "inProgress", label: REQUIREMENT_TAB_LABELS.inProgress },
+  { key: "planning", label: REQUIREMENT_TAB_LABELS.planning },
+  { key: "delivering", label: REQUIREMENT_TAB_LABELS.delivering },
   { key: "delivered", label: REQUIREMENT_TAB_LABELS.delivered },
   { key: "archived", label: REQUIREMENT_TAB_LABELS.archived, muted: true }
 ];
@@ -43,7 +44,8 @@ export function createRequirementBoardProjection(
 ): RequirementBoardProjection {
   const buckets: Record<RequirementTabKey, RequirementView[]> = {
     pending: [],
-    inProgress: [],
+    planning: [],
+    delivering: [],
     delivered: [],
     archived: []
   };

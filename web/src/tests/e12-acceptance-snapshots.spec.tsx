@@ -383,12 +383,12 @@ describe("E12 acceptance DOM baselines", () => {
   });
 
   it("captures requirements page baseline", async () => {
-    // 该用例局部覆盖 status=planning 归"推进中"列；全局 fixture 保持 delivering，避免影响任务看板的计划中需求条。
-    // 看板下所有列同时可见，无需再点 tab。
+    // 该用例局部覆盖 status=planning，归独立「规划中」列；全局 fixture 保持 delivering，避免影响任务看板的需求条。
+    // 看板下所有列同时可见，无需再点 tab。planning 需求此时同时贡献「规划中」列头与卡片徽章，故用 getAllByText。
     vi.mocked(consoleApi.fetchRequirements).mockResolvedValue([{ ...requirements[0], status: "planning" }]);
     const container = await renderRoute("/requirements", /Console v2 trace acceptance/);
     await screen.findByText("Console v2 trace acceptance");
-    expect(screen.getByText("规划中")).toBeInTheDocument();
+    expect(screen.getAllByText("规划中").length).toBeGreaterThan(0);
     expectMainSnapshot(container);
   });
 
