@@ -59,7 +59,25 @@ describe("OverviewPage 活跃需求聚合（含 planning，防静默漏算）", 
       documents: [],
       syncJobs: [],
       indexHealth: null,
-      loadingData: false
+      loadingData: false,
+      // 概览数据盘现需接入就绪才渲染(未就绪走整页引导);本用例聚焦活跃聚合,故置就绪态。
+      onboardingByProject: {
+        "project-1": {
+          value: {
+            projectId: "project-1",
+            localPath: "/tmp/project-1",
+            ccbRuntimeReady: true,
+            knowledgeBaseReady: true,
+            ccbConfigPath: "/tmp/project-1/.ccb/ccb.config",
+            knowledgeBaseRootPath: "/tmp/project-1/docs/.ccb/index",
+            manualCommand: "cd /tmp/project-1 && ccb",
+            checkedAt: "2026-05-10T00:00:00.000Z"
+          },
+          fetchedAt: Date.now(),
+          loading: false,
+          error: null
+        }
+      }
     });
     useUIStore.setState({ toasts: [] });
   });

@@ -4,10 +4,12 @@ import { useNavigate } from "react-router";
 import styles from "./OverviewPage.module.css";
 import { MetricCard } from "../../components/metric/MetricCard.js";
 import { ProjectOnboardingBanner } from "../../components/projects/ProjectOnboardingBanner.js";
+import { ProjectSetupGuide } from "../../components/projects/ProjectSetupGuide.js";
 import { EmptyState } from "../../components/ui/EmptyState.js";
 import { SkeletonStat } from "../../components/ui/Skeleton.js";
 import { formatDayTime } from "../../lib/format.js";
 import { createTaskBoardProjection, isTaskAttentionNeeded } from "../../lib/node-board-config.js";
+import { useProjectOnboardingActions } from "../../lib/use-project-onboarding-actions.js";
 import { useProjectPathBuilder } from "../../lib/project-paths.js";
 import { classifyRequirementTab, isActiveRequirementTab } from "../../lib/ui-mapping.js";
 import { useProjectStore } from "../../stores/project-store.js";
@@ -24,6 +26,8 @@ export function OverviewPage() {
   const indexHealth = useProjectStore((state) => state.indexHealth);
   const loadingData = useProjectStore((state) => state.loadingData);
   const openModal = useUIStore((state) => state.openModal);
+  // 接入动作单元由本页(稳定 owner,跨「引导↔数据盘」切换不卸载)持有;轮询写 store,规避卸载竞态。
+  const onboarding = useProjectOnboardingActions(selectedProjectId);
 
   // 需求是首页主区，但只做粗粒度聚合：活跃 / 需关注 / 已交付（不展开列表、不做多桶分布）。
   // 复用 classifyRequirementTab 作为 status 归类真相源，避免在首页重复定义状态语义。
@@ -75,6 +79,30 @@ export function OverviewPage() {
             <SkeletonStat key={`overview-stat-${index}`} />
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // 接入状态未加载完成:不抢渲染引导/数据盘(不 fail-open),显示检测中骨架。
+  if (onboarding.loading && !onboarding.status) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.primaryStatsGrid}>
+          {Array.from({ length: 3 }).map((_, index) => (
+            <SkeletonStat key={`onboarding-stat-${index}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 未就绪:整页分步初始化引导(隐藏指标卡);就绪后回到下方数据盘。
+  const onboardingReady =
+    onboarding.status?.ccbRuntimeReady === true && onboarding.status?.knowledgeBaseReady === true;
+  if (!onboardingReady) {
+    return (
+      <div className={styles.page}>
+        <ProjectSetupGuide actions={onboarding} />
       </div>
     );
   }
