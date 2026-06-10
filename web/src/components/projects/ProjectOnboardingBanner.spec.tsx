@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useProjectStore } from "../../stores/project-store.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import { ProjectOnboardingBanner } from "./ProjectOnboardingBanner.js";
 
@@ -38,6 +39,8 @@ describe("ProjectOnboardingBanner", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     useUIStore.setState({ toasts: [], mainTerminalOpenRequest: null });
+    // banner 现经 project-store 单一源读接入状态;每例重置避免跨例缓存泄漏。
+    useProjectStore.setState({ onboardingByProject: {} });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
@@ -297,5 +300,37 @@ describe("ProjectOnboardingBanner", () => {
     expect(useUIStore.getState().toasts.some((toast) =>
       toast.message.includes("执行超时") && toast.message.includes("ccb pend job-timeout")
     )).toBe(true);
+  });
+
+  it("unmounting during active init polling does not throw (poll result lands in the store)", async () => {
+    vi.useFakeTimers();
+    vi.mocked(consoleApi.fetchProjectOnboardingStatus).mockResolvedValue(
+      status({ projectId: "project-unmount", knowledgeBaseReady: false })
+    );
+    vi.mocked(consoleApi.initProjectKnowledgeBase).mockResolvedValue({
+      jobId: "job-unmount",
+      claudeAgentName: "project_claude",
+      submittedAt: "2026-05-20T00:00:00.000Z"
+    });
+    vi.mocked(consoleApi.fetchProjectInitJobStatus).mockResolvedValue({
+      jobId: "job-unmount",
+      status: "running",
+      updatedAt: "2026-05-20T00:00:03.000Z"
+    });
+
+    const view = render(<ProjectOnboardingBanner projectId="project-unmount" />);
+    await flushPromises();
+    fireEvent.click(screen.getByRole("button", { name: "一键初始化知识库" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认初始化" }));
+    await flushPromises();
+
+    // 卸载后推进轮询:状态写 project-store(单一源)是安全的,settled 守卫阻止 unmounted setState。
+    view.unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await flushPromises();
+
+    expect(useProjectStore.getState().onboardingByProject["project-unmount"]).toBeDefined();
   });
 });
