@@ -157,29 +157,39 @@ pnpm build
 ./scripts/dev-web.sh
 ```
 
+→ 卡住看 [Troubleshooting](#troubleshooting)
+
 ### 2. 安装底层 bridge
 
 安装 [claude_codex_bridge](https://github.com/SeemSeam/claude_codex_bridge#readme)（提供 `ccb` / `ccbd`、slot 终端和 project ccbd），按其 README 执行 `./install.sh install`。bridge 前置依赖包括 Python 3.10+、`tmux`、Claude / Codex CLI。它是下面 plugin / skills 与整套 CCB 运行时的底座，需先装好。
+
+→ 命令：[claude_codex_bridge 安装](https://github.com/SeemSeam/claude_codex_bridge#readme)
 
 ### 3. 安装 plugin / skills
 
 先按 [su-ccb-claude-plugin 安装说明](https://github.com/Im-Sue/su-ccb-claude-plugin#install) 完成系统级 Claude plugin 安装，并按 [su-ccb-codex-skills 安装说明](https://github.com/Im-Sue/su-ccb-codex-skills#install) 完成用户级 Codex skills 安装；两者都要先装好，再启动 CCB，这样 CCB 派生的 Claude / Codex agent 才会继承 plugin 与 skills。
 
+→ 命令：[plugin 安装](https://github.com/Im-Sue/su-ccb-claude-plugin#install) · [skills 安装](https://github.com/Im-Sue/su-ccb-codex-skills#install)
+
 > **可选增强（推荐）**：再装上 [SuperClaude](https://github.com/SuperClaude-Org/SuperClaude_Framework) 这个系统级 Claude 插件，CCB 的协商 / 审查会自动触发 `/sc:*` 深度分析；缺失不阻塞主流程。按其 README 在系统级 Claude 安装即可。
 
 ### 4. 接入每一个项目
 
-在 SU-Oriel 控制台登记本地项目路径后，页面顶部会出现 `ProjectOnboardingBanner`：
+这步**每接入一个新项目做一次**，不是一次性安装；怎么触发取决于你怎么用。在 SU-Oriel 控制台登记本地项目路径后，页面顶部会出现 `ProjectOnboardingBanner`：
 
-- 可以点击一键投递，让主项目 `ccbd` 执行 `/ccb:su-init`。
-- 也可以复制命令，在该项目终端里手动运行 `/ccb:su-init`。
+- **用 Oriel 控制台**：点 banner「一键投递」，主项目 `ccbd` 自动执行 `/ccb:su-init`，不用手敲命令。
+- **纯用 plugin（不开 Oriel）**：在该项目级 ccb 终端的 **main** 里手动跑 `/ccb:su-init`。
 - ready 判定以项目根下 `.ccb/ccb.config` 与 `docs/.ccb/docs-structure-contract.yaml` 同时存在为准。
+
+→ 详情：[/ccb:su-init](https://github.com/Im-Sue/su-ccb-claude-plugin#命令)
 
 ### 5. 收尾与关闭
 
 - 停 CCB/agent/tmux 运行时：先执行 `ccb kill`；仍有残留时执行 `ccb kill -f`。
 - 停 SU-Oriel 后端和前端：回到运行 `./scripts/dev-server.sh`、`./scripts/dev-web.sh` 的终端，按 `Ctrl-C`，或直接关闭对应终端。
 - 后台 project ccbd 是**有意常驻**：关闭控制台页面或停止 SU-Oriel dev server/web 后，已投递的后台 agent 长任务不会被打断。这不是 bug；需要彻底收尾时再用 `ccb kill` / `ccb kill -f`。
+
+→ 命令：[ccb / ccb kill 参考](https://github.com/SeemSeam/claude_codex_bridge#readme)
 
 ## Troubleshooting
 
