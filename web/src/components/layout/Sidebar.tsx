@@ -3,6 +3,7 @@ import { NavLink } from "react-router";
 
 import { fetchVersion, type SuOrielVersion } from "../../lib/console-api.js";
 import { getTaskAttentionSummary } from "../../lib/node-board-config.js";
+import { filterProjects } from "../../lib/project-filter.js";
 import { projectPath } from "../../lib/project-paths.js";
 import { useProjectOnboardingGate } from "../../lib/use-project-onboarding-gate.js";
 import { useProjectStore } from "../../stores/project-store.js";
@@ -10,7 +11,6 @@ import type { ProjectView } from "../../types/project.js";
 import { useUIStore } from "../../stores/ui-store.js";
 import { AiCliPanel } from "../ai-cli/AiCliPanel.js";
 import { Badge } from "../ui/Badge.js";
-import { Button } from "../ui/Button.js";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
@@ -18,7 +18,6 @@ interface SidebarProps {
   projects: ProjectView[];
   selectedProjectId: string | null;
   onSelectProject: (projectId: string) => void;
-  onCreateProject: () => void;
 }
 
 interface NavItem {
@@ -94,16 +93,7 @@ export function Sidebar(props: SidebarProps) {
     };
   }, []);
 
-  const filteredProjects = useMemo(() => {
-    const normalized = keyword.trim().toLowerCase();
-    if (!normalized) {
-      return props.projects;
-    }
-
-    return props.projects.filter((project) => {
-      return project.name.toLowerCase().includes(normalized) || project.localPath.toLowerCase().includes(normalized);
-    });
-  }, [keyword, props.projects]);
+  const filteredProjects = useMemo(() => filterProjects(props.projects, keyword), [keyword, props.projects]);
 
   return (
     <div className={styles.sidebar}>
@@ -233,9 +223,6 @@ export function Sidebar(props: SidebarProps) {
         <div className={styles.versionStamp} title={versionInfo?.buildDate ? `built ${versionInfo.buildDate}` : displayVersion}>
           {sidebarCollapsed ? `v${versionInfo?.version ?? "0.1.0"}` : displayVersion}
         </div>
-        <Button onClick={props.onCreateProject} size="sm" variant="ghost">
-          {sidebarCollapsed ? "＋" : "新建项目"}
-        </Button>
       </div>
     </div>
   );

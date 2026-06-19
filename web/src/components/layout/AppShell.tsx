@@ -9,6 +9,7 @@ interface AppShellProps {
   sidebar: ReactNode;
   header: ReactNode;
   progress?: ReactNode;
+  projectStrip?: ReactNode;
   children: ReactNode;
 }
 
@@ -30,6 +31,7 @@ export function AppShell(props: AppShellProps) {
         {props.sidebar}
       </aside>
       <div className={styles.workspace}>
+        {props.projectStrip}
         <div aria-label="顶栏" className={styles.topbar} data-layout-region="topbar" role="banner">
           <div className={styles.headerSlot}>{props.header}</div>
           <div aria-label="顶栏工具" className={styles.topbarTools}>

@@ -14,6 +14,7 @@ import { AiCliSettingsModal } from "./components/ai-cli/AiCliSettingsModal.js";
 import { CommandPalette, type CommandPaletteItem } from "./components/command-palette/CommandPalette.js";
 import { HotkeysHelp } from "./components/keyboard/HotkeysHelp.js";
 import { AppShell } from "./components/layout/AppShell.js";
+import { ProjectStrip } from "./components/layout/ProjectStrip.js";
 import { MainTerminalLauncher } from "./components/main-terminal/MainTerminalLauncher.js";
 import { NotificationBell } from "./components/notifications/NotificationBell.js";
 import { NotificationManager } from "./components/notifications/NotificationManager.js";
@@ -623,10 +624,20 @@ function ConsoleLayout() {
     <AppShell
       header={<PageHeader actions={headerActions} projectName={selectedProject?.name ?? null} title={pageTitle} />}
       progress={<ProjectScanProgressBar project={selectedProject} />}
+      projectStrip={
+        selectedProjectId ? (
+          <ProjectStrip
+            loading={loadingProjects}
+            onCreateProject={() => openModal("create-project")}
+            onSelectProject={handleSelectProject}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+          />
+        ) : undefined
+      }
       sidebar={
         <Sidebar
           loading={loadingProjects}
-          onCreateProject={() => openModal("create-project")}
           onSelectProject={handleSelectProject}
           projects={projects}
           selectedProjectId={selectedProjectId}

@@ -52,7 +52,7 @@ function setReady(ready: boolean) {
 function renderSidebar() {
   return render(
     <MemoryRouter>
-      <Sidebar loading={false} projects={[project]} selectedProjectId={PID} onSelectProject={() => {}} onCreateProject={() => {}} />
+      <Sidebar loading={false} projects={[project]} selectedProjectId={PID} onSelectProject={() => {}} />
     </MemoryRouter>
   );
 }
