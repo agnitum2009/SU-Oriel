@@ -215,3 +215,7 @@ SU-Oriel 是 SU-CCB 四仓之一，其余三仓各司其职：
 <img src="assets/wechat.jpg" alt="微信二维码" width="220" />
 
 GitHub [@Im-Sue](https://github.com/Im-Sue) · Telegram [@Sue_muyu](https://t.me/Sue_muyu)
+
+## 友链
+
+- [LINUX DO](https://linux.do/) —— 新的理想型社区
